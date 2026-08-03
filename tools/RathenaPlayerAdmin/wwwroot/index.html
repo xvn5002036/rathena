@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>rAthena 玩家資料管理</title>
+  <style>
+    :root{font-family:system-ui,"Microsoft JhengHei",sans-serif;color:#172033;background:#f3f6fb}body{margin:0}header{background:#172033;color:#fff;padding:18px 24px}main{max-width:1400px;margin:auto;padding:20px}.card{background:#fff;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 2px 12px #16213a14}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}label{display:grid;gap:5px;font-size:13px}input,button,select{font:inherit;padding:8px 10px;border:1px solid #cbd3df;border-radius:7px}button{cursor:pointer;background:#2257d8;color:white;border:0}button.secondary{background:#637083}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px;border-bottom:1px solid #e5e9f0;text-align:left}tr:hover{background:#f6f8fc}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}.tabs button{margin-right:6px}.muted{color:#697386}.danger{color:#ad1f2d}.ok{color:#08783e}dialog{width:min(950px,94vw);border:0;border-radius:12px;padding:20px}dialog::backdrop{background:#0008}.scroll{overflow:auto;max-height:540px}.selected{background:#eaf0ff!important}
+  </style>
+</head>
+<body>
+<header><h2 style="margin:0">rAthena 玩家資料管理</h2><div style="opacity:.75">角色素質、身上裝備、背包與倉庫</div></header>
+<main>
+  <section class="card">
+    <div class="row">
+      <label>角色名稱／Char ID／Account ID<input id="query" placeholder="輸入關鍵字"></label>
+      <label>管理員名稱<input id="admin" value="local-admin"></label>
+      <button onclick="searchCharacters()">搜尋</button>
+    </div>
+  </section>
+
+  <section class="card scroll">
+    <table><thead><tr><th>Char ID</th><th>Account</th><th>名稱</th><th>職業</th><th>Base</th><th>Job</th><th>Zeny</th><th>地圖</th><th>狀態</th></tr></thead><tbody id="characters"></tbody></table>
+  </section>
+
+  <section id="detail" class="card" hidden>
+    <h3 id="charTitle"></h3>
+    <p id="warning" class="danger"></p>
+    <div class="tabs"><button onclick="showTab('stats')">人物素質</button><button onclick="loadInventory()">裝備／背包</button><button onclick="loadStorage()">帳號倉庫</button></div>
+    <div id="statsTab"></div>
+    <div id="itemsTab" class="scroll"></div>
+  </section>
+</main>
+
+<dialog id="itemDialog"><form method="dialog"><button class="secondary" style="float:right">關閉</button></form><h3>修改物品</h3><div id="itemForm" class="grid"></div><p><button onclick="saveItem()">儲存物品</button></p><div id="itemMessage"></div></dialog>
+<script>
+let current=null,currentContainer='',editingItem=null;
+const statFields=['Str','Agi','Vit','IntStat','Dex','Luk','Pow','Sta','Wis','Spl','Con','Crt','BaseLevel','JobLevel','Zeny','StatusPoint','SkillPoint','TraitPoint'];
+const itemFields=['NameId','Amount','Equip','Identify','Refine','Attribute','Card0','Card1','Card2','Card3','OptionId0','OptionVal0','OptionParm0','OptionId1','OptionVal1','OptionParm1','OptionId2','OptionVal2','OptionParm2','OptionId3','OptionVal3','OptionParm3','OptionId4','OptionVal4','OptionParm4','ExpireTime','Bound','EnchantGrade'];
+function headers(){return {'Content-Type':'application/json','X-Admin-User':document.getElementById('admin').value||'local-admin'}}
+async function api(url,opts={}){const r=await fetch(url,opts);const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||data.Error||`HTTP ${r.status}`);return data}
+async function searchCharacters(){
+ const q=encodeURIComponent(document.getElementById('query').value); const rows=await api('/api/characters?q='+q); const body=document.getElementById('characters');body.innerHTML='';
+ rows.forEach(x=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${x.charId}</td><td>${x.accountId}</td><td>${esc(x.name)}</td><td>${x.class}</td><td>${x.baseLevel}</td><td>${x.jobLevel}</td><td>${x.zeny}</td><td>${esc(x.lastMap||'')}</td><td class="${x.online?'danger':'ok'}">${x.online?'在線':'離線'}</td>`;tr.onclick=()=>selectCharacter(x.charId);body.appendChild(tr)})
+}
+async function selectCharacter(id){current=await api('/api/characters/'+id);document.getElementById('detail').hidden=false;document.getElementById('charTitle').textContent=`${current.name}（Char ${current.charId} / Account ${current.accountId}）`;document.getElementById('warning').textContent=current.online?'角色在線中，目前禁止修改，請先讓玩家登出。':'';showTab('stats')}
+function showTab(tab){document.getElementById('itemsTab').innerHTML='';if(tab==='stats')renderStats()}
+function renderStats(){const box=document.getElementById('statsTab');box.innerHTML='<h4>人物與點數</h4><div class="grid" id="statsGrid"></div><p><button onclick="saveStats()">儲存素質</button></p><div id="statsMessage"></div>';const grid=document.getElementById('statsGrid');statFields.forEach(f=>grid.insertAdjacentHTML('beforeend',`<label>${f}<input id="s_${f}" type="number" value="${current[f.charAt(0).toLowerCase()+f.slice(1)]??0}"></label>`))}
+async function saveStats(){try{const body={};statFields.forEach(f=>body[f.charAt(0).toLowerCase()+f.slice(1)]=Number(document.getElementById('s_'+f).value));await api('/api/characters/'+current.charId+'/stats',{method:'PUT',headers:headers(),body:JSON.stringify(body)});document.getElementById('statsMessage').innerHTML='<span class="ok">已儲存。</span>';await selectCharacter(current.charId)}catch(e){document.getElementById('statsMessage').innerHTML='<span class="danger">'+esc(e.message)+'</span>'}}
+async function loadInventory(){currentContainer='inventory';renderItems(await api('/api/characters/'+current.charId+'/inventory'))}
+async function loadStorage(){currentContainer='storage';renderItems(await api('/api/accounts/'+current.accountId+'/storage'))}
+function renderItems(items){document.getElementById('statsTab').innerHTML='';const box=document.getElementById('itemsTab');box.innerHTML=`<h4>${currentContainer==='inventory'?'裝備與背包':'帳號倉庫'}（${items.length}）</h4><table><thead><tr><th>ID</th><th>NameID</th><th>數量</th><th>裝備位置</th><th>精煉</th><th>附魔</th><th>卡片</th><th></th></tr></thead><tbody>${items.map(x=>`<tr><td>${x.id}</td><td>${x.nameId}</td><td>${x.amount}</td><td>${x.equip}</td><td>+${x.refine}</td><td>${x.enchantGrade}</td><td>${x.card0}, ${x.card1}, ${x.card2}, ${x.card3}</td><td><button onclick='editItem(${JSON.stringify(x)})'>修改</button></td></tr>`).join('')}</tbody></table>`}
+function editItem(item){editingItem=item;const form=document.getElementById('itemForm');form.innerHTML='';itemFields.forEach(f=>form.insertAdjacentHTML('beforeend',`<label>${f}<input id="i_${f}" type="number" value="${item[f.charAt(0).toLowerCase()+f.slice(1)]??0}"></label>`));document.getElementById('itemMessage').innerHTML='';document.getElementById('itemDialog').showModal()}
+async function saveItem(){try{const body={};itemFields.forEach(f=>body[f.charAt(0).toLowerCase()+f.slice(1)]=Number(document.getElementById('i_'+f).value));await api(`/api/items/${currentContainer}/${editingItem.id}`,{method:'PUT',headers:headers(),body:JSON.stringify(body)});document.getElementById('itemMessage').innerHTML='<span class="ok">已儲存。</span>';currentContainer==='inventory'?await loadInventory():await loadStorage()}catch(e){document.getElementById('itemMessage').innerHTML='<span class="danger">'+esc(e.message)+'</span>'}}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+document.getElementById('query').addEventListener('keydown',e=>{if(e.key==='Enter')searchCharacters()});searchCharacters();
+</script>
+</body></html>
