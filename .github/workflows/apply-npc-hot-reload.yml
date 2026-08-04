@@ -1,0 +1,218 @@
+name: Apply NPC hot reload
+
+on:
+  push:
+    branches:
+      - feature/dotnet-player-admin
+    paths:
+      - .github/workflows/apply-npc-hot-reload.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dotnet-player-admin
+          fetch-depth: 0
+
+      - name: Apply differential NPC hot reload patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/map/npc.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          marker = 'NPC_AUTOLOAD_HOT_RELOAD'
+          if marker in text:
+              print('NPC hot reload patch is already applied.')
+              raise SystemExit(0)
+
+          old = '#include <cerrno>\n#include <cstdlib>\n#include <map>\n#include <vector>\n'
+          new = '#include <cerrno>\n#include <cstdlib>\n#include <filesystem>\n#include <map>\n#include <system_error>\n#include <vector>\n'
+          if old not in text:
+              raise RuntimeError('Could not find include insertion point')
+          text = text.replace(old, new, 1)
+
+          old = 'TIMER_FUNC(npc_dynamicnpc_removal_timer);\n'
+          new = '''TIMER_FUNC(npc_dynamicnpc_removal_timer);\nTIMER_FUNC(npc_autoload_hot_reload_timer);\nstatic void npc_autoload_initialize(void);\n'''
+          if old not in text:
+              raise RuntimeError('Could not find timer declaration insertion point')
+          text = text.replace(old, new, 1)
+
+          implementation = r'''
+// NPC_AUTOLOAD_HOT_RELOAD
+// Automatically discovers NPC script files below npc/ and reloads only files
+// that were added, modified, or deleted since the previous 3-second scan.
+namespace {
+namespace fs = std::filesystem;
+
+struct npc_autoload_file_state {
+	fs::file_time_type modified;
+	uintmax_t size;
+};
+
+std::map<std::string, npc_autoload_file_state> npc_autoload_files;
+
+bool npc_autoload_is_script_file(const fs::path& path) {
+	std::string extension = path.extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+
+	// rAthena NPC scripts normally use .txt. .npc and .script are also
+	// accepted for custom content. Configuration/YAML files are intentionally
+	// excluded because they are not valid input for npc_parsesrcfile().
+	return extension == ".txt" || extension == ".npc" || extension == ".script";
+}
+
+std::map<std::string, npc_autoload_file_state> npc_autoload_collect_files() {
+	std::map<std::string, npc_autoload_file_state> files;
+	std::error_code error;
+	const fs::path root("npc");
+
+	if (!fs::exists(root, error)) {
+		ShowWarning("npc_autoload: NPC directory '%s' does not exist.\n", root.generic_string().c_str());
+		return files;
+	}
+
+	fs::recursive_directory_iterator iterator(root, fs::directory_options::skip_permission_denied, error);
+	fs::recursive_directory_iterator end;
+
+	while (iterator != end) {
+		if (error) {
+			ShowWarning("npc_autoload: Directory scan error: %s\n", error.message().c_str());
+			error.clear();
+			iterator.increment(error);
+			continue;
+		}
+
+		const fs::directory_entry& entry = *iterator;
+		if (entry.is_regular_file(error) && !error && npc_autoload_is_script_file(entry.path())) {
+			const std::string file = entry.path().generic_string();
+			const auto modified = entry.last_write_time(error);
+			if (!error) {
+				const uintmax_t size = entry.file_size(error);
+				if (!error)
+					files.emplace(file, npc_autoload_file_state{ modified, size });
+			}
+			error.clear();
+		}
+
+		iterator.increment(error);
+	}
+
+	return files;
+}
+}
+
+static void npc_autoload_initialize(void) {
+	npc_autoload_files = npc_autoload_collect_files();
+	int32 added = 0;
+
+	for (const auto& pair : npc_autoload_files) {
+		if (npc_addsrcfile(pair.first.c_str(), false))
+			added++;
+	}
+
+	ShowStatus("npc_autoload: Registered %d NPC script files from npc/ and its subdirectories.\n", added);
+}
+
+TIMER_FUNC(npc_autoload_hot_reload_timer) {
+	const auto current = npc_autoload_collect_files();
+
+	// Deleted files: unload only the deleted script.
+	for (const auto& previous : npc_autoload_files) {
+		if (current.find(previous.first) == current.end()) {
+			ShowStatus("npc_autoload: Unloading deleted NPC script '%s'.\n", previous.first.c_str());
+			npc_unloadfile(previous.first.c_str());
+		}
+	}
+
+	// New and modified files: load or reload only the affected script.
+	for (const auto& file : current) {
+		const auto previous = npc_autoload_files.find(file.first);
+		const bool is_new = previous == npc_autoload_files.end();
+		const bool is_modified = !is_new &&
+			(previous->second.modified != file.second.modified || previous->second.size != file.second.size);
+
+		if (!is_new && !is_modified)
+			continue;
+
+		if (is_modified) {
+			ShowStatus("npc_autoload: Reloading modified NPC script '%s'.\n", file.first.c_str());
+			npc_unloadfile(file.first.c_str());
+		} else {
+			ShowStatus("npc_autoload: Loading new NPC script '%s'.\n", file.first.c_str());
+		}
+
+		if (npc_addsrcfile(file.first.c_str(), true)) {
+			npc_read_event_script();
+			npc_event_doall_path(script_config.init_event_name, file.first.c_str());
+		} else {
+			ShowError("npc_autoload: Failed to load NPC script '%s'.\n", file.first.c_str());
+		}
+	}
+
+	npc_autoload_files = current;
+	return 0;
+}
+
+'''
+          anchor = 'void do_clear_npc(void) {'
+          if anchor not in text:
+              raise RuntimeError('Could not find implementation insertion point')
+          text = text.replace(anchor, implementation + anchor, 1)
+
+          # Add recursive discovery before the normal startup loader. Use the last
+          # occurrence because npc_loadsrcfiles() also appears inside npc_reload().
+          anchor = '\tnpc_loadsrcfiles();'
+          index = text.rfind(anchor)
+          if index < 0:
+              raise RuntimeError('Could not find startup npc_loadsrcfiles call')
+          text = text[:index] + '\tnpc_autoload_initialize();\n\n' + text[index:]
+
+          old = '\tadd_timer_func_list( npc_dynamicnpc_removal_timer, "npc_dynamicnpc_removal_timer" );\n'
+          new = '''\tadd_timer_func_list( npc_dynamicnpc_removal_timer, "npc_dynamicnpc_removal_timer" );
+\tadd_timer_func_list( npc_autoload_hot_reload_timer, "npc_autoload_hot_reload_timer" );
+\tadd_timer_interval(gettick() + 3000, npc_autoload_hot_reload_timer, 0, 0, 3000);
+'''
+          if old not in text:
+              raise RuntimeError('Could not find timer registration insertion point')
+          text = text.replace(old, new, 1)
+
+          old = '\tnpc_src_files.clear();\n}\n\nstatic void npc_debug_warps_sub'
+          new = '\tnpc_src_files.clear();\n\tnpc_autoload_files.clear();\n}\n\nstatic void npc_debug_warps_sub'
+          if old not in text:
+              raise RuntimeError('Could not find finalization insertion point')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          print('Applied differential NPC hot reload patch.')
+          PY
+
+      - name: Verify patch markers
+        run: |
+          grep -n "NPC_AUTOLOAD_HOT_RELOAD" src/map/npc.cpp
+          grep -n "add_timer_interval(gettick() + 3000, npc_autoload_hot_reload_timer" src/map/npc.cpp
+          grep -n "npc_autoload_initialize" src/map/npc.cpp
+
+      - name: Commit changes to target branch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/map/npc.cpp
+          git commit -m "Add differential NPC script hot reload"
+          git push origin HEAD:feature/dotnet-player-admin
