@@ -1,0 +1,8 @@
+﻿{
+    "Server":  "127.0.0.1",
+    "Port":  "3306",
+    "Database":  "rathenadb",
+    "User":  "rathenadbusr",
+    "Password":  "froggopass",
+    "Url":  "http://127.0.0.1:5080"
+}

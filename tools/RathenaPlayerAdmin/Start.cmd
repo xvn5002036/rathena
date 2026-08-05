@@ -1,11 +1,11 @@
 @echo off
-chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Start.ps1"
 
 if errorlevel 1 (
   echo.
-  echo 啟動失敗，請查看上方錯誤訊息。
+  echo Startup failed. Review the error message above.
   pause
 )
