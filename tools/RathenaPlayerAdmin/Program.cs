@@ -9,6 +9,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddSingleton<AdminRepository>();
 builder.Services.AddSingleton<KickService>();
 builder.Services.AddSingleton(new AtCommandCatalog(Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "doc", "atcommands.txt"))));
+builder.Services.AddSingleton(new JobCatalog(Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "src", "common", "mmo.hpp"))));
 var app = builder.Build();
 
 app.UseDefaultFiles();
@@ -34,6 +35,17 @@ app.MapPut("/api/characters/{charId:int}/stats", async (int charId, CharacterSta
     var result = await repo.UpdateStatsAsync(charId, input, GetOperator(http));
     return result.Success ? Results.Ok(result) : Results.BadRequest(result);
 });
+
+app.MapGet("/api/jobs", (JobCatalog catalog) => Results.Ok(catalog.Jobs));
+
+app.MapPut("/api/characters/{charId:int}/job", async (int charId, ChangeJobRequest input, HttpContext http, AdminRepository repo) =>
+{
+    var result = await repo.QueueJobChangeAsync(charId, input.JobId, GetOperator(http));
+    return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+});
+
+app.MapGet("/api/characters/{charId:int}/job/status", async (int charId, AdminRepository repo) =>
+    Results.Ok(await repo.GetLastJobChangeStatusAsync(charId)));
 
 app.MapPut("/api/items/{container}/{id:int}", async (string container, int id, ItemUpdate input, HttpContext http, AdminRepository repo) =>
 {
@@ -89,7 +101,7 @@ static string GetOperator(HttpContext context) =>
         ? value.ToString()[..Math.Min(value.ToString().Length, 80)]
         : "local-admin";
 
-sealed class AdminRepository(IConfiguration configuration, KickService kickService)
+sealed class AdminRepository(IConfiguration configuration, KickService kickService, JobCatalog jobCatalog)
 {
     private readonly string _connectionString = configuration.GetConnectionString("Rathena")
         ?? throw new InvalidOperationException("ConnectionStrings:Rathena is required.");
@@ -186,6 +198,46 @@ sealed class AdminRepository(IConfiguration configuration, KickService kickServi
         await WriteAuditAsync(db, tx, admin, "character.stats.update", "char", charId, input);
         await tx.CommitAsync();
         return OperationResult.Ok();
+    }
+
+    public async Task<OperationResult> QueueJobChangeAsync(int charId, int jobId, string admin)
+    {
+        var job = jobCatalog.Jobs.FirstOrDefault(entry => entry.Id == jobId);
+        if (job is null) return OperationResult.Fail("此職業 ID 不存在於目前的 rAthena 版本。");
+        if (!job.Selectable) return OperationResult.Fail("rAthena 的 @jobchange 不允許直接切換到此活動／外觀變體職業。");
+
+        await using var db = Open();
+        await db.OpenAsync();
+        var character = await db.QuerySingleOrDefaultAsync<(int AccountId, int Online, int OldJobId)>(
+            "SELECT account_id AccountId,online Online,class OldJobId FROM `char` WHERE char_id=@charId", new { charId });
+        if (character.AccountId == 0) return OperationResult.Fail("找不到角色。");
+        if (character.Online == 0) return OperationResult.Fail("角色必須在線，才能透過 map-server 執行原生 @jobchange 轉職流程。");
+
+        const string create = """
+            CREATE TABLE IF NOT EXISTS `dotnet_admin_jobchange_queue` (
+              `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, `account_id` INT UNSIGNED NOT NULL,
+              `char_id` INT UNSIGNED NOT NULL, `job_id` INT NOT NULL,
+              `requested_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `processed_at` DATETIME NULL,
+              PRIMARY KEY (`id`), KEY `pending` (`processed_at`,`id`)
+            ) ENGINE=InnoDB;
+            """;
+        await db.ExecuteAsync(create);
+        await using var tx = await db.BeginTransactionAsync();
+        await db.ExecuteAsync(
+            "INSERT INTO dotnet_admin_jobchange_queue(account_id,char_id,job_id) VALUES(@accountId,@charId,@jobId)",
+            new { accountId = character.AccountId, charId, jobId }, tx);
+        await WriteAuditAsync(db, tx, admin, "character.jobchange.execute", "char", charId,
+            new { character.OldJobId, NewJobId = jobId, job.Name, Mode = "map-server jobchange" });
+        await tx.CommitAsync();
+        return OperationResult.Ok();
+    }
+
+    public async Task<object?> GetLastJobChangeStatusAsync(int charId)
+    {
+        await using var db = Open();
+        return await db.QuerySingleOrDefaultAsync(
+            "SELECT id AS Id,job_id AS JobId,requested_at AS RequestedAt,processed_at AS ProcessedAt FROM dotnet_admin_jobchange_queue WHERE char_id=@charId ORDER BY id DESC LIMIT 1",
+            new { charId });
     }
 
     public async Task<OperationResult> UpdateItemAsync(string table, int id, ItemUpdate input, string admin)
@@ -531,6 +583,73 @@ sealed class AtCommandCatalog
     }
 }
 
+sealed class JobCatalog
+{
+    public IReadOnlyList<JobDefinition> Jobs { get; }
+
+    public JobCatalog(string sourcePath)
+    {
+        if (!File.Exists(sourcePath))
+            throw new FileNotFoundException("rAthena job definition file was not found.", sourcePath);
+
+        var text = File.ReadAllText(sourcePath);
+        var enumMatch = Regex.Match(text, @"enum\s+e_job\s*\{(?<body>[\s\S]*?)\};");
+        if (!enumMatch.Success) throw new InvalidOperationException("Unable to parse rAthena e_job definitions.");
+
+        var jobs = new List<JobDefinition>();
+        var nextValue = 0;
+        foreach (var rawLine in enumMatch.Groups["body"].Value.Split('\n'))
+        {
+            var line = Regex.Replace(rawLine, @"//.*$", "").Trim().TrimEnd(',');
+            if (line.Length == 0) continue;
+            var match = Regex.Match(line, @"^(?<name>JOB_[A-Z0-9_]+)(?:\s*=\s*(?<value>\d+))?$");
+            if (!match.Success) continue;
+            if (match.Groups["value"].Success) nextValue = int.Parse(match.Groups["value"].Value);
+
+            var name = match.Groups["name"].Value;
+            if (!name.Contains("MAX") && !name.Contains("_START") && !name.Contains("_END"))
+            {
+                var category = GetCategory(name, nextValue);
+                var selectable = IsSelectable(name, category);
+                jobs.Add(new JobDefinition(nextValue, name, category, GetDescription(name, category), selectable));
+            }
+            nextValue++;
+        }
+        Jobs = jobs;
+    }
+
+    private static string GetCategory(string name, int id)
+    {
+        if (Regex.IsMatch(name, "WEDDING|XMAS|SUMMER|HANBOK|OKTOBERFEST")) return "活動外觀";
+        if (name.Contains("BABY") || name == "JOB_BABY") return "養子職業";
+        if (Regex.IsMatch(name, "DRAGON_KNIGHT|MEISTER|SHADOW_CROSS|ARCH_MAGE|CARDINAL|WINDHAWK|IMPERIAL_GUARD|BIOLO|ABYSS_CHASER|ELEMENTAL_MASTER|INQUISITOR|TROUBADOUR|TROUVERE")) return "四轉職業";
+        if (Regex.IsMatch(name, "RUNE_KNIGHT|WARLOCK|RANGER|ARCH_BISHOP|ARCHBISHOP|MECHANIC|GUILLOTINE_CROSS|ROYAL_GUARD|SORCERER|MINSTREL|WANDERER|SURA|GENETIC|SHADOW_CHASER")) return "三轉職業";
+        if (Regex.IsMatch(name, "HIGH|LORD_KNIGHT|HIGH_PRIEST|HIGH_WIZARD|WHITESMITH|SNIPER|ASSASSIN_CROSS|PALADIN|CHAMPION|PROFESSOR|STALKER|CREATOR|CLOWN|GYPSY")) return "轉生職業";
+        if (Regex.IsMatch(name, "TAEKWON|STAR_|SOUL_|GUNSLINGER|REBELLION|NINJA|KAGEROU|OBORO|SUMMONER|SPIRIT_HANDLER|SKY_EMPEROR|SHINKIRO|SHIRANUI|NIGHT_WATCH|HYPER_NOVICE|SUPER_|GANGSI|DEATH_KNIGHT|DARK_COLLECTOR")) return "擴充職業";
+        if (id is >= 7 and <= 21) return "二轉職業";
+        return "初心者與一轉";
+    }
+
+    private static string GetDescription(string name, string category)
+    {
+        var display = name[4..].Replace('_', ' ').ToLowerInvariant();
+        display = string.Join(' ', display.Split(' ').Select(word => char.ToUpperInvariant(word[0]) + word[1..]));
+        var extra = name.EndsWith("2") || name.EndsWith("_T") || name.EndsWith("_T2") || name.Contains("_2ND")
+            ? "此為客戶端使用的外觀／性別／騎乘變體 ID，選用前請確認客戶端支援。"
+            : $"屬於「{category}」分類。更換後需重新登入，技能樹與裝備限制不會自動重置。";
+        return $"{display}（{name}）。{extra}";
+    }
+
+    private static bool IsSelectable(string name, string category)
+    {
+        if (category == "活動外觀") return false;
+        if (Regex.IsMatch(name, @"(^JOB_KNIGHT2$|^JOB_CRUSADER2$|^JOB_LORD_KNIGHT2$|^JOB_PALADIN2$|^JOB_STAR_GLADIATOR2$|_T2?$|2$|_2ND$)")) return false;
+        return true;
+    }
+}
+
+record JobDefinition(int Id, string Name, string Category, string Description, bool Selectable);
+
 record AtCommandDefinition(string Category, string Name, string Usage, string Description, string DescriptionZh);
 record AtCommandRequest(int ExecutorCharId, string Command);
 
@@ -567,6 +686,7 @@ record ItemUpdate(int NameId, int Amount, uint Equip, int Identify, int Refine, 
 }
 
 record CloneCharacterRequest(int TargetCharId);
+record ChangeJobRequest(int JobId);
 
 record OperationResult(bool Success, string? Error)
 {
