@@ -1,0 +1,271 @@
+name: Apply NPC hot reload
+
+on:
+  push:
+    branches:
+      - feature/dotnet-player-admin
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dotnet-player-admin
+          fetch-depth: 0
+
+      - name: Apply safe differential NPC hot reload patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/map/npc.cpp')
+          text = path.read_text(encoding='utf-8')
+          marker = 'NPC_AUTOLOAD_HOT_RELOAD_V2'
+
+          if marker in text:
+              print('Safe NPC hot reload patch is already applied.')
+              raise SystemExit(0)
+
+          # Remove the earlier generated implementation when present so this
+          # workflow can safely upgrade it to the corrected V2 implementation.
+          old_marker = '// NPC_AUTOLOAD_HOT_RELOAD\n'
+          if old_marker in text:
+              start = text.index(old_marker)
+              end = text.index('void do_clear_npc(void) {', start)
+              text = text[:start] + text[end:]
+              text = text.replace('#include <filesystem>\n', '')
+              text = text.replace('#include <system_error>\n', '')
+              text = text.replace('TIMER_FUNC(npc_autoload_hot_reload_timer);\n', '')
+              text = text.replace('static void npc_autoload_initialize(void);\n', '')
+              text = text.replace('\tnpc_autoload_initialize();\n\n', '')
+              text = text.replace('\tadd_timer_func_list( npc_autoload_hot_reload_timer, "npc_autoload_hot_reload_timer" );\n', '')
+              text = text.replace('\tadd_timer_interval(gettick() + 3000, npc_autoload_hot_reload_timer, 0, 0, 3000);\n', '')
+              text = text.replace('\tnpc_autoload_files.clear();\n', '')
+
+          old = '#include <cerrno>\n#include <cstdlib>\n#include <map>\n#include <vector>\n'
+          new = '#include <cerrno>\n#include <cstdlib>\n#include <filesystem>\n#include <map>\n#include <system_error>\n#include <vector>\n'
+          if old not in text:
+              raise RuntimeError('Could not find include insertion point')
+          text = text.replace(old, new, 1)
+
+          old = 'TIMER_FUNC(npc_dynamicnpc_removal_timer);\n'
+          new = '''TIMER_FUNC(npc_dynamicnpc_removal_timer);
+TIMER_FUNC(npc_autoload_hot_reload_timer);
+static void npc_autoload_initialize(void);
+'''
+          if old not in text:
+              raise RuntimeError('Could not find timer declaration insertion point')
+          text = text.replace(old, new, 1)
+
+          implementation = r'''
+// NPC_AUTOLOAD_HOT_RELOAD_V2
+// Startup: recursively register every supported script under npc/ before the
+// normal loader runs, ensuring every script is parsed once whenever map-server starts.
+// Runtime: every three seconds compare metadata and reload only added, modified,
+// or deleted files. Unchanged scripts are never parsed or loaded again.
+namespace {
+namespace fs = std::filesystem;
+
+struct npc_autoload_file_state {
+	fs::file_time_type modified;
+	uintmax_t size;
+};
+
+std::map<std::string, npc_autoload_file_state> npc_autoload_files;
+
+bool npc_autoload_is_script_file(const fs::path& path) {
+	std::string extension = path.extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+		return static_cast<char>(std::tolower(c));
+	});
+
+	return extension == ".txt" || extension == ".npc" || extension == ".script";
+}
+
+std::map<std::string, npc_autoload_file_state> npc_autoload_collect_files() {
+	std::map<std::string, npc_autoload_file_state> files;
+	std::error_code error;
+	const fs::path root("npc");
+
+	if (!fs::exists(root, error)) {
+		ShowWarning("npc_autoload: NPC directory '%s' does not exist.\n", root.generic_string().c_str());
+		return files;
+	}
+
+	fs::recursive_directory_iterator iterator(root, fs::directory_options::skip_permission_denied, error);
+	const fs::recursive_directory_iterator end;
+
+	while (iterator != end) {
+		if (error) {
+			ShowWarning("npc_autoload: Directory scan error: %s\n", error.message().c_str());
+			error.clear();
+			iterator.increment(error);
+			continue;
+		}
+
+		const fs::directory_entry& entry = *iterator;
+		if (entry.is_regular_file(error) && !error && npc_autoload_is_script_file(entry.path())) {
+			const std::string file = entry.path().generic_string();
+			const fs::file_time_type modified = entry.last_write_time(error);
+			if (!error) {
+				const uintmax_t size = entry.file_size(error);
+				if (!error)
+					files.emplace(file, npc_autoload_file_state{ modified, size });
+			}
+			error.clear();
+		}
+
+		iterator.increment(error);
+	}
+
+	return files;
+}
+
+bool npc_autoload_npc_belongs_to_file(int32 npc_id, const std::string& path) {
+	npc_data* nd = map_id2nd(npc_id);
+	return nd != nullptr && nd->path != nullptr && strcasecmp(nd->path, path.c_str()) == 0;
+}
+
+void npc_autoload_close_affected_sessions(const std::string& path) {
+	s_mapiterator* iterator = mapit_geteachpc();
+
+	for (block_list* bl = mapit_first(iterator); mapit_exists(iterator); bl = mapit_next(iterator)) {
+		map_session_data* sd = reinterpret_cast<map_session_data*>(bl);
+
+		if (sd->npc_id != 0 && npc_autoload_npc_belongs_to_file(sd->npc_id, path)) {
+			const int32 npc_id = sd->npc_id;
+			clif_scriptclose(*sd, npc_id);
+			npc_event_dequeue(sd, true);
+		}
+
+		if (sd->npc_shopid != 0 && npc_autoload_npc_belongs_to_file(sd->npc_shopid, path))
+			sd->npc_shopid = 0;
+	}
+
+	mapit_free(iterator);
+}
+}
+
+static void npc_autoload_initialize(void) {
+	npc_autoload_files = npc_autoload_collect_files();
+	int32 registered = 0;
+
+	for (const auto& file : npc_autoload_files) {
+		if (npc_addsrcfile(file.first.c_str(), false))
+			registered++;
+	}
+
+	ShowStatus("npc_autoload: Startup registered %d scripts from npc/ and all subdirectories.\n", registered);
+}
+
+TIMER_FUNC(npc_autoload_hot_reload_timer) {
+	const auto current = npc_autoload_collect_files();
+	auto next_snapshot = npc_autoload_files;
+
+	// Deleted files: safely close only affected dialogs and unload only that file.
+	for (const auto& previous : npc_autoload_files) {
+		if (current.find(previous.first) != current.end())
+			continue;
+
+		ShowStatus("npc_autoload: Unloading deleted script '%s'.\n", previous.first.c_str());
+		npc_autoload_close_affected_sessions(previous.first);
+		npc_unloadfile(previous.first.c_str());
+		next_snapshot.erase(previous.first);
+	}
+
+	// New/modified files: unchanged files are skipped without parsing or loading.
+	for (const auto& file : current) {
+		const auto previous = npc_autoload_files.find(file.first);
+		const bool is_new = previous == npc_autoload_files.end();
+		const bool is_modified = !is_new &&
+			(previous->second.modified != file.second.modified || previous->second.size != file.second.size);
+
+		if (!is_new && !is_modified)
+			continue;
+
+		if (is_modified) {
+			ShowStatus("npc_autoload: Reloading modified script '%s'.\n", file.first.c_str());
+			npc_autoload_close_affected_sessions(file.first);
+			npc_unloadfile(file.first.c_str());
+		} else {
+			ShowStatus("npc_autoload: Loading new script '%s'.\n", file.first.c_str());
+		}
+
+		if (npc_addsrcfile(file.first.c_str(), true)) {
+			npc_read_event_script();
+			npc_event_doall_path(script_config.init_event_name, file.first.c_str());
+			next_snapshot[file.first] = file.second;
+		} else {
+			// Do not accept the new snapshot. The next 3-second scan retries it.
+			ShowError("npc_autoload: Failed to load '%s'; it will be retried.\n", file.first.c_str());
+		}
+	}
+
+	npc_autoload_files = std::move(next_snapshot);
+	return 0;
+}
+
+'''
+          anchor = 'void do_clear_npc(void) {'
+          if anchor not in text:
+              raise RuntimeError('Could not find implementation insertion point')
+          text = text.replace(anchor, implementation + anchor, 1)
+
+          # Register every discovered file before the normal startup loader. The
+          # normal loader then parses every registered script exactly once.
+          startup_loader = '\tnpc_loadsrcfiles();'
+          index = text.rfind(startup_loader)
+          if index < 0:
+              raise RuntimeError('Could not find startup npc_loadsrcfiles call')
+          text = text[:index] + '\tnpc_autoload_initialize();\n\n' + text[index:]
+
+          old = '\tadd_timer_func_list( npc_dynamicnpc_removal_timer, "npc_dynamicnpc_removal_timer" );\n'
+          new = '''\tadd_timer_func_list( npc_dynamicnpc_removal_timer, "npc_dynamicnpc_removal_timer" );
+\tadd_timer_func_list( npc_autoload_hot_reload_timer, "npc_autoload_hot_reload_timer" );
+\tadd_timer_interval(gettick() + 3000, npc_autoload_hot_reload_timer, 0, 0, 3000);
+'''
+          if old not in text:
+              raise RuntimeError('Could not find timer registration insertion point')
+          text = text.replace(old, new, 1)
+
+          old = '\tnpc_src_files.clear();\n}\n\nstatic void npc_debug_warps_sub'
+          new = '\tnpc_src_files.clear();\n\tnpc_autoload_files.clear();\n}\n\nstatic void npc_debug_warps_sub'
+          if old not in text:
+              raise RuntimeError('Could not find finalization insertion point')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          print('Applied safe differential NPC hot reload V2 patch.')
+          PY
+
+      - name: Verify required behavior
+        shell: bash
+        run: |
+          grep -n "NPC_AUTOLOAD_HOT_RELOAD_V2" src/map/npc.cpp
+          grep -n "npc_autoload_initialize();" src/map/npc.cpp
+          grep -n "npc_loadsrcfiles();" src/map/npc.cpp
+          grep -n "add_timer_interval(gettick() + 3000, npc_autoload_hot_reload_timer" src/map/npc.cpp
+          grep -n "npc_autoload_close_affected_sessions" src/map/npc.cpp
+          grep -n "if (!is_new && !is_modified)" src/map/npc.cpp
+
+      - name: Commit corrected implementation
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/map/npc.cpp
+          git commit -m "Add safe differential NPC script hot reload"
+          git push origin HEAD:feature/dotnet-player-admin
