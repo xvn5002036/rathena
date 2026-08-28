@@ -13,7 +13,26 @@ OnMenu:
 // Player menu
 // ============================================================
 OnPlayerMenu:
-	switch(select("完全恢復 HP / SP:返回儲存點:個人倉庫:便捷設定:關閉菜單")) {
+	.@back$ = (getgmlevel() > 0) ? "返回 GM 主菜單" : "關閉菜單";
+	.@menu$ = "完全恢復 HP / SP:返回儲存點:個人倉庫:基本藥水商店【NPC +50%】:";
+	.@type[0] = 1;
+	.@type[1] = 2;
+	.@type[2] = 3;
+	.@type[3] = 4;
+	.@count = 4;
+	if ($PWRefine || $PWGrade || $PWMerge || $PWEnchant || $PWSocket || $PWCardRemove || $PWCardMove || $PWGradeExchange || $PWRepair) {
+		.@menu$ += "高級裝備工坊:";
+		.@type[.@count++] = 5;
+	}
+	.@menu$ += "便捷設定:" + .@back$;
+	.@type[.@count++] = 6;
+	.@choice = select(.@menu$);
+	if (.@choice > .@count) {
+		if (getgmlevel() > 0)
+			goto OnGMMenu;
+		close;
+	}
+	switch(.@type[.@choice - 1]) {
 	case 1:
 		percentheal 100, 100;
 		goto OnPlayerMenu;
@@ -24,10 +43,276 @@ OnPlayerMenu:
 		openstorage;
 		end;
 	case 4:
+		goto OnPlayerPotionShop;
+	case 5:
+		goto OnPlayerWorkshop;
+	case 6:
 		goto OnPlayerSettings;
-	default:
-		close;
 	}
+	goto OnPlayerMenu;
+
+OnPlayerPotionShop:
+	callshop "PortablePotionShop", 1;
+	end;
+
+OnPlayerWorkshop:
+	.@menu$ = "";
+	.@count = 0;
+	if ($PWRefine) { .@menu$ += "原版裝備精煉:"; .@type[.@count++] = 1; }
+	if ($PWGrade) { .@menu$ += "原版階級強化:"; .@type[.@count++] = 2; }
+	if ($PWMerge) { .@menu$ += "原版物品合併:"; .@type[.@count++] = 3; }
+	if ($PWEnchant) { .@menu$ += "台版風格裝備附魔:"; .@type[.@count++] = 9; }
+	if ($PWSocket) { .@menu$ += "裝備打洞:"; .@type[.@count++] = 4; }
+	if ($PWCardRemove) { .@menu$ += "卡片拆卸:"; .@type[.@count++] = 5; }
+	if ($PWCardMove) { .@menu$ += "購買移卡券:"; .@type[.@count++] = 6; }
+	if ($PWGradeExchange) { .@menu$ += "階級材料交換:"; .@type[.@count++] = 7; }
+	if ($PWRepair) { .@menu$ += "修理全部裝備:"; .@type[.@count++] = 8; }
+	if (!.@count)
+		goto OnPlayerMenu;
+	.@menu$ += "返回玩家主菜單";
+	.@choice = select(.@menu$);
+	if (.@choice > .@count)
+		goto OnPlayerMenu;
+	switch(.@type[.@choice - 1]) {
+	case 1:
+		refineui();
+		end;
+	case 2:
+		enchantgradeui();
+		end;
+	case 3:
+		mergeitem;
+		goto OnPlayerWorkshop;
+	case 4:
+		goto OnPlayerSocket;
+	case 5:
+		goto OnPlayerCardRemove;
+	case 6:
+		callshop "change_slot#slo";
+		end;
+	case 7:
+		callshop "EnchantGradeExchange";
+		end;
+	case 8:
+		goto OnPlayerRepair;
+	case 9:
+		goto OnPlayerEnchant;
+	default:
+		goto OnPlayerMenu;
+	}
+
+OnPlayerEnchant:
+	setarray .@pos[0],EQI_HEAD_TOP,EQI_ARMOR,EQI_HAND_L,EQI_HAND_R,EQI_GARMENT,EQI_SHOES,EQI_ACC_L,EQI_ACC_R,EQI_HEAD_MID,EQI_HEAD_LOW;
+	.@choice = select("頭部上段:身體裝備:左手裝備:右手裝備:披肩裝備:鞋子裝備:左側飾品:右側飾品:頭部中段:頭部下段:返回高級裝備工坊");
+	if (.@choice == 11) goto OnPlayerWorkshop;
+	.@part = .@pos[.@choice - 1];
+	if (!getequipisequiped(.@part)) {
+		dispbottom "這個部位目前沒有穿戴裝備。";
+		goto OnPlayerEnchant;
+	}
+	.@item = getequipid(.@part);
+	.@slot = select("附魔第 1 欄【500,000 遊戲幣／材料 1】:附魔第 2 欄【1,000,000 遊戲幣／材料 5】:附魔第 3 欄【2,000,000 遊戲幣／材料 10】:取消") - 1;
+	if (.@slot == 3) goto OnPlayerEnchant;
+	setarray .@fee[0],500000,1000000,2000000;
+	setarray .@amount[0],1,5,10;
+	.@material = (getiteminfo(.@item,ITEMINFO_TYPE) == IT_WEAPON) ? 984 : 985;
+	.@material_name$ = (.@material == 984) ? "神之金屬" : "鋁";
+	.@style = select("物理攻擊型:魔法攻擊型:生存防禦型:六圍能力型:取消");
+	if (.@style == 5) goto OnPlayerEnchant;
+	if (select("確定重洗此附魔欄｜原能力會被覆蓋:取消") != 1) goto OnPlayerEnchant;
+	if (Zeny < .@fee[.@slot] || countitem(.@material) < .@amount[.@slot]) {
+		dispbottom "附魔材料不足：需要 " + .@fee[.@slot] + " 遊戲幣與" + .@material_name$ + " " + .@amount[.@slot] + " 個。";
+		goto OnPlayerEnchant;
+	}
+	// Recheck the equipped item after all menus to prevent equipment swapping exploits.
+	if (!getequipisequiped(.@part) || getequipid(.@part) != .@item) {
+		dispbottom "裝備狀態已改變，請重新操作。";
+		goto OnPlayerEnchant;
+	}
+	Zeny -= .@fee[.@slot];
+	delitem .@material,.@amount[.@slot];
+	if (.@style == 1) {
+		setarray .@oid[0],RDMOPT_VAR_ATKPERCENT,RDMOPT_VAR_ATTPOWER,RDMOPT_VAR_HITSUCCESSVALUE,RDMOPT_VAR_CRITICALSUCCESSVALUE,RDMOPT_VAR_PLUSASPDPERCENT;
+		setarray .@oname$[0],"物理攻擊力百分比","物理攻擊力","命中率","暴擊率","攻擊速度";
+		.@pick = rand(5);
+		.@value = (.@pick == 1 || .@pick == 2 || .@pick == 3) ? rand(5,21) : rand(1,8);
+		.@suffix$ = (.@pick == 0 || .@pick == 4) ? "%" : "";
+	}
+	else if (.@style == 2) {
+		setarray .@oid[0],RDMOPT_VAR_MAGICATKPERCENT,RDMOPT_VAR_ATTMPOWER,RDMOPT_VAR_MAXSPPERCENT,RDMOPT_VAR_INTAMOUNT,RDMOPT_VAR_DEXAMOUNT;
+		setarray .@oname$[0],"魔法攻擊力百分比","魔法攻擊力","最大魔力值","智力","靈巧";
+		.@pick = rand(5);
+		.@value = (.@pick == 1) ? rand(5,21) : rand(1,8);
+		.@suffix$ = (.@pick == 0 || .@pick == 2) ? "%" : "";
+	}
+	else if (.@style == 3) {
+		setarray .@oid[0],RDMOPT_VAR_MAXHPPERCENT,RDMOPT_VAR_ITEMDEFPOWER,RDMOPT_VAR_MDEFPOWER,RDMOPT_VAR_AVOIDSUCCESSVALUE,RDMOPT_VAR_VITAMOUNT;
+		setarray .@oname$[0],"最大生命值","物理防禦力","魔法防禦力","迴避率","體力";
+		.@pick = rand(5);
+		.@value = (.@pick == 1 || .@pick == 2 || .@pick == 3) ? rand(5,21) : rand(1,8);
+		.@suffix$ = (.@pick == 0) ? "%" : "";
+	}
+	else {
+		setarray .@oid[0],RDMOPT_VAR_STRAMOUNT,RDMOPT_VAR_AGIAMOUNT,RDMOPT_VAR_VITAMOUNT,RDMOPT_VAR_INTAMOUNT,RDMOPT_VAR_DEXAMOUNT,RDMOPT_VAR_LUKAMOUNT;
+		setarray .@oname$[0],"力量","敏捷","體力","智力","靈巧","幸運";
+		.@pick = rand(6);
+		.@value = rand(1,8);
+		.@suffix$ = "";
+	}
+	setrandomoption .@part,.@slot,.@oid[.@pick],.@value,0;
+	.@result$ = "第 " + (.@slot + 1) + " 欄附魔完成｜^00AA00" + .@oname$[.@pick] + " +" + .@value + .@suffix$ + "^000000";
+	dispbottom "附魔完成：" + .@oname$[.@pick] + " +" + .@value + .@suffix$ + "。";
+	select(.@result$ + ":繼續附魔");
+	goto OnPlayerEnchant;
+
+OnPlayerSocket:
+	switch(select("武器打洞:防具打洞:太陽神頭盔特殊打洞:返回高級裝備工坊")) {
+	case 1: goto OnSocketWeapon;
+	case 2: goto OnSocketArmor;
+	case 3: callsub S_SocketApply,5022,5353,4,95,200000,969,2; goto OnPlayerSocket;
+	default: goto OnPlayerWorkshop;
+	}
+
+OnSocketWeapon:
+	switch(select("C 級武器:B 級武器:A 級武器:S 級武器:返回打洞選單")) {
+	case 1:
+		switch(select("地靈之書:水靈之書:風靈之書:火靈之書:返回")) {
+		case 1: callsub S_SocketApply,1554,1569,40,66,200,1010,10; break;
+		case 2: callsub S_SocketApply,1553,1568,40,66,200,1010,10; break;
+		case 3: callsub S_SocketApply,1556,1571,40,66,200,1010,10; break;
+		case 4: callsub S_SocketApply,1555,1570,40,66,200,1010,10; break;
+		default: goto OnSocketWeapon;
+		}
+		goto OnSocketWeapon;
+	case 2:
+		switch(select("獸人斧:彎刀:尖刃鐵錘:返回")) {
+		case 1: callsub S_SocketApply,1304,1309,40,66,200,984,1; break;
+		case 2: callsub S_SocketApply,1113,1114,40,66,200,984,1; break;
+		case 3: callsub S_SocketApply,1523,1538,40,61,300,984,1; break;
+		default: goto OnSocketWeapon;
+		}
+		goto OnSocketWeapon;
+	case 3:
+		.@c = select("龍牙劍:地靈拳刃:火靈拳刃:冰靈拳刃:風靈拳刃:黃金之錘:東方琵琶:女王的鞭子:妖怪長槍:風靈之矛:施魏澤劍:返回");
+		if (.@c == 12) goto OnSocketWeapon;
+		setarray .@src[1],13001,1257,1258,1256,1259,1524,1918,1970,1477,1474,1167;
+		setarray .@dst[1],13030,1276,1277,1275,1278,1539,1922,1976,1479,1480,1178;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,(.@c < 6 ? 66 : (.@c < 9 || .@c == 11 ? 61 : 56)),500,984,2;
+		goto OnSocketWeapon;
+	case 4:
+		.@c = select("風靈之矛:破甲短錐:屠龍劍:破錐短劍:刺客短劍:聖十字之錘:處刑者之劍:返回");
+		if (.@c == 8) goto OnSocketWeapon;
+		setarray .@src[1],1468,1225,1166,1224,1232,1528,1169;
+		setarray .@dst[1],1481,13032,1180,13031,13033,1540,1179;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,51,1000,984,5,999,10;
+		goto OnSocketWeapon;
+	default: goto OnPlayerSocket;
+	}
+
+OnSocketArmor:
+	switch(select("C 級防具:B 級防具:A 級防具:S 級防具:返回打洞選單")) {
+	case 1:
+		.@c = select("向日葵髮夾:博士帽:大髮帶:男孩帽:返回");
+		if (.@c == 5) goto OnSocketArmor;
+		setarray .@src[1],2253,5012,2244,5016;
+		setarray .@dst[1],5351,5347,5348,5349;
+		setarray .@amt[1],3,3,5,5;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,66,100,999,.@amt[.@c];
+		goto OnSocketArmor;
+	case 2:
+		.@c = select("骷髏戒指:高跟鞋:返回");
+		if (.@c == 3) goto OnSocketArmor;
+		setarray .@src[1],2609,2409;
+		setarray .@dst[1],2715,2432;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,61,300,999,5;
+		goto OnSocketArmor;
+	case 3:
+		.@c = select("海盜頭巾:黑皮靴:返回");
+		if (.@c == 3) goto OnSocketArmor;
+		if (.@c == 1) callsub S_SocketApply,2287,5350,50,61,500,985,1;
+		else callsub S_SocketApply,2425,2434,40,51,500,985,1;
+		goto OnSocketArmor;
+	case 4:
+		.@c = select("魔法外套:神聖長袍:聖職之袍:三角褲:襯衫:返回");
+		if (.@c == 6) goto OnSocketArmor;
+		setarray .@src[1],2334,2327,2111,2522,2339;
+		setarray .@dst[1],2372,2373,2128,2523,2371;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],(.@c == 1 ? 40 : 45),51,1000,985,1;
+		goto OnSocketArmor;
+	default: goto OnPlayerSocket;
+	}
+
+S_SocketApply:
+	.@src = getarg(0); .@dst = getarg(1); .@low = getarg(2); .@high = getarg(3);
+	.@fee = getarg(4) * 1000; .@mat1 = getarg(5); .@amt1 = getarg(6);
+	.@mat2 = getarg(7,0); .@amt2 = getarg(8,0);
+	.@confirm$ = getitemname(.@src) + " → " + getitemname(.@dst) + "｜費用 " + .@fee + " Zeny｜確定:";
+	.@confirm$ += "取消";
+	if (select(.@confirm$) != 1) return;
+	if (!checkweight(.@dst,1)) { dispbottom "負重或物品欄空間不足。"; return; }
+	if (Zeny < .@fee || countitem(.@src) < 1 || countitem(.@mat1) < .@amt1 || (.@mat2 && countitem(.@mat2) < .@amt2)) {
+		dispbottom "Zeny、原裝備或打洞材料不足。";
+		return;
+	}
+	delitem .@src,1;
+	delitem .@mat1,.@amt1;
+	if (.@mat2) delitem .@mat2,.@amt2;
+	Zeny -= .@fee;
+	.@roll = rand(1,100);
+	if (.@roll > .@low && .@roll < .@high) {
+		getitem .@dst,1;
+		dispbottom "打洞成功：已取得 " + getitemname(.@dst) + "。";
+	}
+	else
+		dispbottom "打洞失敗：裝備、材料與費用已消耗。";
+	return;
+
+OnPlayerCardRemove:
+	setarray .@pos[0],EQI_HEAD_TOP,EQI_ARMOR,EQI_HAND_L,EQI_HAND_R,EQI_GARMENT,EQI_SHOES,EQI_ACC_L,EQI_ACC_R,EQI_HEAD_MID,EQI_HEAD_LOW;
+	.@menu$ = ""; .@count = 0;
+	for (.@i = 0; .@i < 10; .@i++) {
+		if (getequipisequiped(.@pos[.@i]) && getequipcardcnt(.@pos[.@i]) > 0) {
+			.@menu$ += F_getpositionname(.@pos[.@i]) + "【" + getequipname(.@pos[.@i]) + "】:";
+			.@part[.@count++] = .@pos[.@i];
+		}
+	}
+	if (!.@count) { dispbottom "目前穿戴中的裝備沒有可拆卸卡片。"; goto OnPlayerWorkshop; }
+	.@menu$ += "返回高級裝備工坊";
+	.@choice = select(.@menu$);
+	if (.@choice > .@count) goto OnPlayerWorkshop;
+	.@part = .@part[.@choice - 1];
+	.@cards = getequipcardcnt(.@part);
+	.@fee = 200000 + .@cards * 25000;
+	.@safe = select("保留裝備優先｜" + .@fee + " Zeny:保留卡片優先｜" + .@fee + " Zeny:取消");
+	if (.@safe == 3) goto OnPlayerCardRemove;
+	if (Zeny < .@fee || countitem(1000) < 1 || countitem(715) < 1) {
+		dispbottom "需要 " + .@fee + " Zeny、星星的角 1 個及黃寶石 1 個。";
+		goto OnPlayerCardRemove;
+	}
+	if (!checkweight(1202,.@cards + 1)) { dispbottom "負重或物品欄空間不足。"; goto OnPlayerCardRemove; }
+	Zeny -= .@fee; delitem 1000,1; delitem 715,1;
+	.@roll = rand(100);
+	if (.@roll < 2) { failedremovecards .@part,0; dispbottom "拆卡完全失敗：裝備與卡片皆損毀。"; }
+	else if (.@roll < 8 && .@safe == 1) { failedremovecards .@part,1; dispbottom "拆卡部分失敗：裝備保留、卡片損毀。"; }
+	else if (.@roll < 8 && .@safe == 2) { failedremovecards .@part,2; dispbottom "拆卡部分失敗：卡片保留、裝備損毀。"; }
+	else if (.@roll < 10) { failedremovecards .@part,3; dispbottom "拆卡失敗：裝備與卡片保留，費用不退。"; }
+	else { successremovecards .@part; dispbottom "拆卡成功，裝備與卡片均已保留。"; }
+	goto OnPlayerCardRemove;
+
+OnPlayerRepair:
+	.@count = 0;
+	while (getbrokenid(.@count + 1)) .@count++;
+	if (!.@count) { dispbottom "目前沒有損壞的裝備。"; goto OnPlayerWorkshop; }
+	.@fee = .@count * 5000;
+	if (select("修理 " + .@count + " 件裝備｜費用 " + .@fee + " Zeny:取消") != 1) goto OnPlayerWorkshop;
+	.@verify = 0;
+	while (getbrokenid(.@verify + 1)) .@verify++;
+	if (.@verify != .@count) { dispbottom "損壞裝備數量已變更，請重新操作。"; goto OnPlayerWorkshop; }
+	if (Zeny < .@fee) { dispbottom "Zeny 不足，需要 " + .@fee + " Zeny。"; goto OnPlayerWorkshop; }
+	Zeny -= .@fee;
+	while (.@count) { repair(.@count); .@count--; }
+	dispbottom "裝備修理完成，已支付 " + .@fee + " Zeny。";
+	goto OnPlayerWorkshop;
 
 OnPlayerSettings:
 	.@menu$ = "自動拾取【" + (#PM_Autoloot ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
@@ -62,11 +347,11 @@ OnPlayerSettings:
 // GM main menu
 // ============================================================
 OnGMMenu:
-	.@menu$ = "自身功能:快速傳送:玩家工具:倉庫功能:";
-	.@count = 4;
+	.@menu$ = "玩家功能:自身功能:快速傳送:玩家工具:倉庫功能:";
+	.@count = 5;
 	if (getgmlevel() >= 99) {
 		.@menu$ += "角色管理:管理員工具:";
-		.@count = 6;
+		.@count = 7;
 	}
 	.@menu$ += "關閉菜單";
 	.@choice = select(.@menu$);
@@ -75,12 +360,13 @@ OnGMMenu:
 		close;
 
 	switch(.@choice) {
-	case 1: goto OnGMSelfTools;
-	case 2: goto OnGMWarpMenu;
-	case 3: goto OnGMPlayerTools;
-	case 4: goto OnGMStorageMenu;
-	case 5: goto OnGMCharacterSetup;
-	case 6: goto OnGMAdminTools;
+	case 1: goto OnPlayerMenu;
+	case 2: goto OnGMSelfTools;
+	case 3: goto OnGMWarpMenu;
+	case 4: goto OnGMPlayerTools;
+	case 5: goto OnGMStorageMenu;
+	case 6: goto OnGMCharacterSetup;
+	case 7: goto OnGMAdminTools;
 	}
 	goto OnGMMenu;
 
@@ -931,7 +1217,7 @@ OnGMAdminTools:
 		close;
 	}
 
-	switch (select("全服廣播:召回指定玩家:踢除指定玩家:建立物品:重載物品資料庫:重載魔物資料庫:重載戰鬥設定:返回 GM 主菜單")) {
+	switch (select("全服廣播:召回指定玩家:踢除指定玩家:建立物品:重載物品資料庫:重載魔物資料庫:重載戰鬥設定:管理藥水商店:工坊功能開關:返回 GM 主菜單")) {
 	case 1:
 		input .@message$;
 		if (select("確定送出:取消") == 2) {
@@ -982,7 +1268,153 @@ OnGMAdminTools:
 		close2;
 		atcommand "@reloadbattleconf";
 		end;
+	case 8:
+		goto OnGMPotionManage;
+	case 9:
+		goto OnGMWorkshopToggle;
 	default:
 		goto OnGMMenu;
 	}
+// ============================================================
+// In-game potion shop management
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+OnGMWorkshopToggle:
+	if (getgmlevel() < 99)
+		close;
+
+	.@menu$ = "原版裝備精煉【" + ($PWRefine ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "原版階級強化【" + ($PWGrade ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "原版物品合併【" + ($PWMerge ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "台版風格裝備附魔【" + ($PWEnchant ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "裝備打洞【" + ($PWSocket ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "卡片拆卸【" + ($PWCardRemove ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "購買移卡券【" + ($PWCardMove ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "階級材料交換【" + ($PWGradeExchange ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "修理全部裝備【" + ($PWRepair ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "返回管理員工具";
+
+	switch(select(.@menu$)) {
+	case 1: $PWRefine = !$PWRefine; goto OnGMWorkshopToggle;
+	case 2: $PWGrade = !$PWGrade; goto OnGMWorkshopToggle;
+	case 3: $PWMerge = !$PWMerge; goto OnGMWorkshopToggle;
+	case 4: $PWEnchant = !$PWEnchant; goto OnGMWorkshopToggle;
+	case 5: $PWSocket = !$PWSocket; goto OnGMWorkshopToggle;
+	case 6: $PWCardRemove = !$PWCardRemove; goto OnGMWorkshopToggle;
+	case 7: $PWCardMove = !$PWCardMove; goto OnGMWorkshopToggle;
+	case 8: $PWGradeExchange = !$PWGradeExchange; goto OnGMWorkshopToggle;
+	case 9: $PWRepair = !$PWRepair; goto OnGMWorkshopToggle;
+	default: goto OnGMAdminTools;
+	}
+OnGMPotionManage:
+	if (getgmlevel() < 99)
+		close;
+
+	switch(select("新增或修改商品:刪除商品:重設基本藥水【NPC +50%】:返回管理員工具")) {
+	case 1:
+		input .@item_id, 1, 1000000;
+		input .@price, 1, 2147483647;
+		.@found = -1;
+		for (.@i = 0; .@i < $PMShopCount; .@i++) {
+			if ($PMShopItem[.@i] == .@item_id) {
+				.@found = .@i;
+				break;
+			}
+		}
+		if (.@found >= 0) {
+			npcshopdelitem "PortablePotionShop", .@item_id;
+			$PMShopPrice[.@found] = .@price;
+		}
+		else {
+			$PMShopItem[$PMShopCount] = .@item_id;
+			$PMShopPrice[$PMShopCount] = .@price;
+			$PMShopCount++;
+		}
+		npcshopadditem "PortablePotionShop", .@item_id, .@price;
+		goto OnGMPotionManage;
+
+	case 2:
+		goto OnGMPotionDelete;
+
+	case 3:
+		callsub S_ResetPotionShop;
+		goto OnGMPotionManage;
+
+	default:
+		goto OnGMAdminTools;
+	}
+
+OnGMPotionDelete:
+	if ($PMShopCount <= 0)
+		goto OnGMPotionManage;
+
+	.@menu$ = "";
+	for (.@i = 0; .@i < $PMShopCount; .@i++)
+		.@menu$ += getitemname($PMShopItem[.@i]) + "【" + $PMShopPrice[.@i] + " Zeny】:";
+	.@menu$ += "返回商品管理";
+	.@choice = select(.@menu$) - 1;
+	if (.@choice >= $PMShopCount)
+		goto OnGMPotionManage;
+
+	npcshopdelitem "PortablePotionShop", $PMShopItem[.@choice];
+	for (.@i = .@choice; .@i < $PMShopCount - 1; .@i++) {
+		$PMShopItem[.@i] = $PMShopItem[.@i + 1];
+		$PMShopPrice[.@i] = $PMShopPrice[.@i + 1];
+	}
+	$PMShopCount--;
+	deletearray $PMShopItem[$PMShopCount], 1;
+	deletearray $PMShopPrice[$PMShopCount], 1;
+	goto OnGMPotionDelete;
+
+S_ResetPotionShop:
+	callsub S_ClearPotionShop;
+	setarray $PMShopItem[0], 501, 502, 503, 504, 505, 506;
+	setarray $PMShopPrice[0], 75, 300, 825, 1800, 7500, 60;
+	$PMShopCount = 6;
+	$PMShopInitialized = 1;
+	callsub S_LoadPotionShop;
+	return;
+
+S_ClearPotionShop:
+	for (.@i = 0; .@i < $PMShopCount; .@i++)
+		npcshopdelitem "PortablePotionShop", $PMShopItem[.@i];
+	npcshopdelitem "PortablePotionShop", 501;
+	return;
+
+S_LoadPotionShop:
+	for (.@i = 0; .@i < $PMShopCount; .@i++)
+		npcshopadditem "PortablePotionShop", $PMShopItem[.@i], $PMShopPrice[.@i];
+	return;
+
+OnInit:
+	if (!$PWEnchantInitialized) {
+		$PWEnchant = 1;
+		$PWEnchantInitialized = 1;
+	}
+	if (!$PWInitialized) {
+		$PWRefine = 1;
+		$PWGrade = 1;
+		$PWMerge = 1;
+		$PWEnchant = 1;
+		$PWSocket = 1;
+		$PWCardRemove = 1;
+		$PWCardMove = 1;
+		$PWGradeExchange = 1;
+		$PWRepair = 1;
+		$PWInitialized = 1;
+	}
+	if (!$PMShopInitialized)
+		callsub S_ResetPotionShop;
+	else {
+		npcshopdelitem "PortablePotionShop", 501;
+		callsub S_LoadPotionShop;
+	}
+	end;
 }
+
+-	shop	PortablePotionShop	-1,501:75
