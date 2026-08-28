@@ -1,0 +1,981 @@
+// Portable menu opened by the custom @menu atcommand.
+-	script	PortableMenu	-1,{
+
+// ============================================================
+// Entry
+// ============================================================
+OnMenu:
+	if (getgmlevel() > 0)
+		goto OnGMMenu;
+	goto OnPlayerMenu;
+
+// ============================================================
+// Player menu
+// ============================================================
+OnPlayerMenu:
+	switch(select("完全恢復 HP / SP:返回儲存點:個人倉庫:便捷設定:關閉菜單")) {
+	case 1:
+		percentheal 100, 100;
+		goto OnPlayerMenu;
+	case 2:
+		warp "SavePoint", 0, 0;
+		end;
+	case 3:
+		openstorage;
+		end;
+	case 4:
+		goto OnPlayerSettings;
+	default:
+		close;
+	}
+
+OnPlayerSettings:
+	.@menu$ = "自動拾取【" + (#PM_Autoloot ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "經驗值顯示【" + (#PM_ShowExp ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "Zeny 顯示【" + (#PM_ShowZeny ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "拒絕邀請【" + (#PM_NoAsk ? "^00AA00開啟^000000" : "^FF5555關閉^000000") + "】:";
+	.@menu$ += "返回玩家主菜單";
+
+	switch(select(.@menu$)) {
+	case 1:
+		#PM_Autoloot = !#PM_Autoloot;
+		.@command$ = #PM_Autoloot ? "@autoloot 100" : "@autoloot 0";
+		atcommand .@command$;
+		goto OnPlayerSettings;
+	case 2:
+		#PM_ShowExp = !#PM_ShowExp;
+		atcommand "@showexp";
+		goto OnPlayerSettings;
+	case 3:
+		#PM_ShowZeny = !#PM_ShowZeny;
+		atcommand "@showzeny";
+		goto OnPlayerSettings;
+	case 4:
+		#PM_NoAsk = !#PM_NoAsk;
+		atcommand "@noask";
+		goto OnPlayerSettings;
+	default:
+		goto OnPlayerMenu;
+	}
+
+// ============================================================
+// GM main menu
+// ============================================================
+OnGMMenu:
+	.@menu$ = "自身功能:快速傳送:玩家工具:倉庫功能:";
+	.@count = 4;
+	if (getgmlevel() >= 99) {
+		.@menu$ += "角色管理:管理員工具:";
+		.@count = 6;
+	}
+	.@menu$ += "關閉菜單";
+	.@choice = select(.@menu$);
+
+	if (.@choice > .@count)
+		close;
+
+	switch(.@choice) {
+	case 1: goto OnGMSelfTools;
+	case 2: goto OnGMWarpMenu;
+	case 3: goto OnGMPlayerTools;
+	case 4: goto OnGMStorageMenu;
+	case 5: goto OnGMCharacterSetup;
+	case 6: goto OnGMAdminTools;
+	}
+	goto OnGMMenu;
+
+// ============================================================
+// GM character management
+// ============================================================
+OnGMCharacterSetup:
+	if (getgmlevel() < 99)
+		close;
+
+	switch(select("金錢／點數設定:職業切換:坐騎／夥伴:學會全部技能:套用 GM 素質:領取 GM 裝備:返回 GM 主菜單")) {
+	case 1:
+		goto OnGMCurrency;
+	case 2:
+		goto OnGMJobMenu;
+	case 3:
+		goto OnGMCompanionMenu;
+	case 4:
+		atcommand "@allskill";
+		goto OnGMCharacterSetup;
+	case 5:
+		statusup2 bStr, 130 - readparam(bStr);
+		statusup2 bAgi, 130 - readparam(bAgi);
+		statusup2 bVit, 130 - readparam(bVit);
+		statusup2 bInt, 130 - readparam(bInt);
+		statusup2 bDex, 130 - readparam(bDex);
+		statusup2 bLuk, 130 - readparam(bLuk);
+		statusup2 bPow, 100 - readparam(bPow);
+		statusup2 bSta, 100 - readparam(bSta);
+		statusup2 bWis, 100 - readparam(bWis);
+		statusup2 bSpl, 100 - readparam(bSpl);
+		statusup2 bCon, 100 - readparam(bCon);
+		statusup2 bCrt, 100 - readparam(bCrt);
+		goto OnGMCharacterSetup;
+	case 6:
+		getitem 50000, 1;
+		getitem 50001, 1;
+		getitem 50002, 1;
+		getitem 50003, 1;
+		getitem 50004, 1;
+		getitem 50005, 1;
+		goto OnGMCharacterSetup;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMCurrency:
+	switch(select("Zeny【" + Zeny + "】:商城點數【" + #CASHPOINTS + "】:Kafra 點數【" + #KAFRAPOINTS + "】:返回角色管理")) {
+	case 1:
+		input .@value, 0, 2147483647;
+		Zeny = .@value;
+		goto OnGMCurrency;
+	case 2:
+		input .@value, 0, 2147483647;
+		#CASHPOINTS = .@value;
+		goto OnGMCurrency;
+	case 3:
+		input .@value, 0, 2147483647;
+		#KAFRAPOINTS = .@value;
+		goto OnGMCurrency;
+	default:
+		goto OnGMCharacterSetup;
+	}
+
+// ============================================================
+// GM companions and mounts
+// ============================================================
+OnGMCompanionMenu:
+	.@menu$ = "";
+	.@count = 0;
+	deletearray .@type;
+
+	if (getskilllv("MC_PUSHCART") > 0) {
+		.@menu$ += "推車【" + (checkcart() ? "^00AA00使用中^000000" : "^FF5555未使用^000000") + "】:";
+		.@type[.@count] = 1;
+		.@count++;
+	}
+
+	if (
+		getskilllv("HT_FALCON") > 0 &&
+		Class != JOB_RANGER &&
+		Class != JOB_WINDHAWK
+	) {
+		.@menu$ += "獵鷹【" + (checkfalcon() ? "^00AA00使用中^000000" : "^FF5555未使用^000000") + "】:";
+		.@type[.@count] = 2;
+		.@count++;
+	}
+
+	if (
+		getskilllv("KN_RIDING") > 0 &&
+		Class != JOB_RUNE_KNIGHT &&
+		Class != JOB_DRAGON_KNIGHT
+	) {
+		.@menu$ += "騎乘獸【" + (checkriding() ? "^00AA00騎乘中^000000" : "^FF5555未騎乘^000000") + "】:";
+		.@type[.@count] = 3;
+		.@count++;
+	}
+
+	if (
+		Class == JOB_RUNE_KNIGHT ||
+		Class == JOB_DRAGON_KNIGHT
+	) {
+		.@menu$ += "龍【" + (checkdragon() ? "^00AA00騎乘中^000000" : "^FF5555未騎乘^000000") + "】:";
+		.@type[.@count] = 4;
+		.@count++;
+	}
+
+	if (
+		Class == JOB_MECHANIC ||
+		Class == JOB_MEISTER
+	) {
+		.@menu$ += "魔導機甲【" + (checkmadogear() ? "^00AA00搭乘中^000000" : "^FF5555未搭乘^000000") + "】:";
+		.@type[.@count] = 5;
+		.@count++;
+	}
+
+	if (
+		Class == JOB_RANGER ||
+		Class == JOB_WINDHAWK
+	) {
+		.@menu$ += "遊俠夥伴【" + (checkwug() ? "^00AA00狼^000000" : (checkfalcon() ? "^00AA00獵鷹^000000" : "^FF5555無^000000")) + "】:";
+		.@type[.@count] = 6;
+		.@count++;
+	}
+
+	.@menu$ += "返回 GM 角色設定";
+	.@sel = select(.@menu$);
+
+	if (.@sel > .@count) {
+		goto OnGMCharacterSetup;
+	}
+
+	switch(.@type[.@sel - 1]) {
+	case 1: goto OnGMCartToggle;
+	case 2: goto OnGMFalconToggle;
+	case 3: goto OnGMRidingToggle;
+	case 4: goto OnGMDragonToggle;
+	case 5: goto OnGMMadoToggle;
+	case 6: goto OnGMRangerPet;
+	}
+
+	goto OnGMCompanionMenu;
+
+OnGMCartToggle:
+	if (checkcart())
+		setcart 0;
+	else
+		setcart;
+	goto OnGMCompanionMenu;
+
+OnGMFalconToggle:
+	if (checkfalcon()) {
+		setfalcon 0;
+	}
+	else if (!checkwug()) {
+		setfalcon;
+	}
+	goto OnGMCompanionMenu;
+
+OnGMRidingToggle:
+	if (checkriding())
+		setriding 0;
+	else
+		setriding;
+	goto OnGMCompanionMenu;
+
+OnGMDragonToggle:
+	if (checkdragon()) {
+		setdragon 0;
+		goto OnGMCompanionMenu;
+	}
+
+	switch(select("綠龍:棕龍:灰龍:藍龍:紅龍:返回")) {
+	case 1: setdragon 1; break;
+	case 2: setdragon 2; break;
+	case 3: setdragon 3; break;
+	case 4: setdragon 4; break;
+	case 5: setdragon 5; break;
+	}
+	goto OnGMCompanionMenu;
+
+OnGMMadoToggle:
+	if (checkmadogear())
+		setmadogear 0;
+	else
+		setmadogear;
+	goto OnGMCompanionMenu;
+
+OnGMRangerPet:
+	.@falcon$ = "獵鷹【" + (checkfalcon() ? "^00AA00使用中^000000" : "^FF5555未使用^000000") + "】";
+	.@wug$ = "狼笛【" + (countitem(6124) ? "^00AA00已持有^000000" : "^FF5555未持有^000000") + "】";
+
+	switch(select(.@falcon$ + ":" + .@wug$ + ":返回")) {
+	case 1:
+		if (checkfalcon())
+			setfalcon 0;
+		else if (!checkwug())
+			setfalcon;
+		goto OnGMRangerPet;
+
+	case 2:
+		if (!checkfalcon() && !checkwug() && !countitem(6124))
+			getitem 6124, 1;
+		goto OnGMRangerPet;
+
+	default:
+		goto OnGMCompanionMenu;
+	}
+OnGMJobMenu:
+
+	switch (select("初心者／一轉職業:二轉職業（可繼續進階）:轉生二轉（可繼續進階）:三轉職業（下一階四轉）:四轉職業（一般系最高階）:擴充職業:GM 指令模式（Job ID／Upper）:返回 GM 角色設定")) {
+	case 1: goto OnGMJobFirst;
+	case 2: goto OnGMJobSecond;
+	case 3: goto OnGMJobTranscendent;
+	case 4: goto OnGMJobThird;
+	case 5: goto OnGMJobFourth;
+	case 6: goto OnGMJobExpanded;
+	case 7: goto OnGMJobCommand;
+	default:
+		goto OnGMCharacterSetup;
+	}
+
+OnGMJobCommand:
+	input .@job_id, 0, 10000;
+	.@upper_choice = select("不指定 Upper:普通職業（0）:轉生職業（1）:養子職業（2）:取消並返回");
+	if (.@upper_choice == 5) {
+		goto OnGMJobMenu;
+	}
+
+	.@command$ = "@jobchange " + .@job_id;
+	if (.@upper_choice > 1)
+		.@command$ += " " + (.@upper_choice - 2);
+
+	if (select("執行 GM 指令:取消並返回") == 2) {
+		goto OnGMJobMenu;
+	}
+	getmapxy(.@return_map$, .@return_x, .@return_y, BL_PC);
+	close2;
+	atcommand .@command$;
+	atcommand "@allskill";
+	sleep2 300;
+	warp .@return_map$, .@return_x, .@return_y;
+	end;
+
+OnGMJobFirst:
+	switch (select("初心者:劍士:魔法師:弓箭手:服事:商人:盜賊:返回職業分類")) {
+	case 1: callsub S_ChangeJob, JOB_NOVICE; end;
+	case 2: callsub S_ChangeJob, JOB_SWORDMAN; end;
+	case 3: callsub S_ChangeJob, JOB_MAGE; end;
+	case 4: callsub S_ChangeJob, JOB_ARCHER; end;
+	case 5: callsub S_ChangeJob, JOB_ACOLYTE; end;
+	case 6: callsub S_ChangeJob, JOB_MERCHANT; end;
+	case 7: callsub S_ChangeJob, JOB_THIEF; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobSecond:
+
+	.@performer$ = (Sex == SEX_MALE) ? "吟遊詩人" : "舞孃";
+	switch (select(
+	"騎士（劍士系）:"
+	+ "十字軍（劍士系）:"
+	+ "巫師（魔法師系）:"
+	+ "賢者（魔法師系）:"
+	+ "獵人（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "祭司（服事系）:"
+	+ "武僧（服事系）:"
+	+ "鐵匠（商人系）:"
+	+ "鍊金術師（商人系）:"
+	+ "刺客（盜賊系）:"
+	+ "流氓（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_CRUSADER; end;
+	case 3: callsub S_ChangeJob, JOB_WIZARD; end;
+	case 4: callsub S_ChangeJob, JOB_SAGE; end;
+	case 5: callsub S_ChangeJob, JOB_HUNTER; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_BARD : JOB_DANCER; end;
+	case 7: callsub S_ChangeJob, JOB_PRIEST; end;
+	case 8: callsub S_ChangeJob, JOB_MONK; end;
+	case 9: callsub S_ChangeJob, JOB_BLACKSMITH; end;
+	case 10: callsub S_ChangeJob, JOB_ALCHEMIST; end;
+	case 11: callsub S_ChangeJob, JOB_ASSASSIN; end;
+	case 12: callsub S_ChangeJob, JOB_ROGUE; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobTranscendent:
+
+	.@performer$ = (Sex == SEX_MALE) ? "搞笑藝人" : "冷豔舞姬";
+	switch (select(
+	"騎士領主（劍士系）:"
+	+ "聖殿十字軍（劍士系）:"
+	+ "超魔導師（魔法師系）:"
+	+ "智者（魔法師系）:"
+	+ "神射手（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "神官（服事系）:"
+	+ "武術宗師（服事系）:"
+	+ "神工匠（商人系）:"
+	+ "創造者（商人系）:"
+	+ "十字刺客（盜賊系）:"
+	+ "神行太保（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_LORD_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_PALADIN; end;
+	case 3: callsub S_ChangeJob, JOB_HIGH_WIZARD; end;
+	case 4: callsub S_ChangeJob, JOB_PROFESSOR; end;
+	case 5: callsub S_ChangeJob, JOB_SNIPER; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_CLOWN : JOB_GYPSY; end;
+	case 7: callsub S_ChangeJob, JOB_HIGH_PRIEST; end;
+	case 8: callsub S_ChangeJob, JOB_CHAMPION; end;
+	case 9: callsub S_ChangeJob, JOB_WHITESMITH; end;
+	case 10: callsub S_ChangeJob, JOB_CREATOR; end;
+	case 11: callsub S_ChangeJob, JOB_ASSASSIN_CROSS; end;
+	case 12: callsub S_ChangeJob, JOB_STALKER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobThird:
+
+	.@performer$ = (Sex == SEX_MALE) ? "宮廷樂師" : "浪姬舞者";
+	switch (select(
+	"盧恩騎士（劍士系）:"
+	+ "皇家禁衛隊（劍士系）:"
+	+ "咒術士（魔法師系）:"
+	+ "妖術師（魔法師系）:"
+	+ "遊俠（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "大主教（服事系）:"
+	+ "修羅（服事系）:"
+	+ "機匠（商人系）:"
+	+ "基因學者（商人系）:"
+	+ "十字斬首者（盜賊系）:"
+	+ "魅影追蹤者（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_RUNE_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_ROYAL_GUARD; end;
+	case 3: callsub S_ChangeJob, JOB_WARLOCK; end;
+	case 4: callsub S_ChangeJob, JOB_SORCERER; end;
+	case 5: callsub S_ChangeJob, JOB_RANGER; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_MINSTREL : JOB_WANDERER; end;
+	case 7: callsub S_ChangeJob, JOB_ARCH_BISHOP; end;
+	case 8: callsub S_ChangeJob, JOB_SURA; end;
+	case 9: callsub S_ChangeJob, JOB_MECHANIC; end;
+	case 10: callsub S_ChangeJob, JOB_GENETIC; end;
+	case 11: callsub S_ChangeJob, JOB_GUILLOTINE_CROSS; end;
+	case 12: callsub S_ChangeJob, JOB_SHADOW_CHASER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobFourth:
+
+	.@performer$ = (Sex == SEX_MALE) ? "天籟頌者" : "樂之舞靈";
+switch (select(
+	"天帝劍士（劍士系）:"
+	+ "帝國聖衛軍（劍士系）:"
+	+ "禁咒魔導士（魔法師系）:"
+	+ "元素支配者（魔法師系）:"
+	+ "風鷹狩獵者（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "樞機主教（服事系）:"
+	+ "聖裁者（服事系）:"
+	+ "生命締造者（商人系）:"
+	+ "生物學者（商人系）:"
+	+ "暗影十字（盜賊系）:"
+	+ "深淵追跡者（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_DRAGON_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_IMPERIAL_GUARD; end;
+	case 3: callsub S_ChangeJob, JOB_ARCH_MAGE; end;
+	case 4: callsub S_ChangeJob, JOB_ELEMENTAL_MASTER; end;
+	case 5: callsub S_ChangeJob, JOB_WINDHAWK; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_TROUBADOUR : JOB_TROUVERE; end;
+	case 7: callsub S_ChangeJob, JOB_CARDINAL; end;
+	case 8: callsub S_ChangeJob, JOB_INQUISITOR; end;
+	case 9: callsub S_ChangeJob, JOB_MEISTER; end;
+	case 10: callsub S_ChangeJob, JOB_BIOLO; end;
+	case 11: callsub S_ChangeJob, JOB_SHADOW_CROSS; end;
+	case 12: callsub S_ChangeJob, JOB_ABYSS_CHASER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobExpanded:
+	.@ninja$ = (Sex == SEX_MALE) ? "日影忍者" : "月影忍者";
+	.@fourth_ninja$ = (Sex == SEX_MALE) ? "蜃氣樓" : "不知火";
+	switch (select("超級初心者:神槍手:反叛者:忍者:" + .@ninja$ + ":跆拳少年／少女:拳聖:悟靈士:星帝:獵靈士:召喚師:頂級初心者:夜巡者:" + .@fourth_ninja$ + ":天帝:靈導士:魂靈師:返回職業分類")) {
+	case 1: callsub S_ChangeJob, JOB_SUPER_NOVICE; end;
+	case 2: callsub S_ChangeJob, JOB_GUNSLINGER; end;
+	case 3: callsub S_ChangeJob, JOB_REBELLION; end;
+	case 4: callsub S_ChangeJob, JOB_NINJA; end;
+	case 5: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_KAGEROU : JOB_OBORO; end;
+	case 6: callsub S_ChangeJob, JOB_TAEKWON; end;
+	case 7: callsub S_ChangeJob, JOB_STAR_GLADIATOR; end;
+	case 8: callsub S_ChangeJob, JOB_SOUL_LINKER; end;
+	case 9: callsub S_ChangeJob, JOB_STAR_EMPEROR; end;
+	case 10: callsub S_ChangeJob, JOB_SOUL_REAPER; end;
+	case 11: callsub S_ChangeJob, JOB_SUMMONER; end;
+	case 12: callsub S_ChangeJob, JOB_HYPER_NOVICE; end;
+	case 13: callsub S_ChangeJob, JOB_NIGHT_WATCH; end;
+	case 14: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_SHINKIRO : JOB_SHIRANUI; end;
+	case 15: callsub S_ChangeJob, JOB_SKY_EMPEROR; end;
+	case 16: callsub S_ChangeJob, JOB_SOUL_ASCETIC; end;
+	case 17: callsub S_ChangeJob, JOB_SPIRIT_HANDLER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+S_ChangeJob:
+	.@job_id = getarg(0);
+
+if (select("確定切換:取消") == 2) {
+		goto OnGMJobMenu;
+	}
+
+	atcommand "@jobchange " + .@job_id;
+	atcommand "@allskill";
+
+	callsub S_JobExtraOption, .@job_id;
+
+	end;
+
+S_JobExtraOption:
+	.@job_id = getarg(0);
+
+// ========================================================
+	// Mechanic
+	// 推車 / 魔導機甲
+	// ========================================================
+	if (.@job_id == JOB_MECHANIC) {
+
+		.@choice = select("使用推車:搭乘魔導機甲:都不要");
+
+		switch(.@choice) {
+		case 1:
+			if (!checkcart())
+				setcart;
+			break;
+
+		case 2:
+			if (
+				getskilllv("NC_MADOLICENCE") > 0 &&
+				!checkmadogear()
+			)
+				setmadogear;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Meister
+	// 推車 / 魔導機甲
+	// ========================================================
+	if (.@job_id == JOB_MEISTER) {
+
+		.@choice = select("使用推車:搭乘魔導機甲:都不要");
+
+		switch(.@choice) {
+		case 1:
+			if (!checkcart())
+				setcart;
+			break;
+
+		case 2:
+			if (
+				getskilllv("NC_MADOLICENCE") > 0 &&
+				!checkmadogear()
+			)
+				setmadogear;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// 其他商人系
+	// 推車
+	// ========================================================
+	if (getskilllv("MC_PUSHCART") > 0) {
+
+		if (select("使用推車:不要使用") == 1) {
+			if (!checkcart())
+				setcart;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Ranger
+	// Falcon / Warg
+	// ========================================================
+	if (.@job_id == JOB_RANGER) {
+
+		.@choice = select("攜帶獵鷹:取得狼笛:都不要");
+
+		switch(.@choice) {
+
+		case 1:
+			if (
+				getskilllv("HT_FALCON") > 0 &&
+				!checkfalcon() &&
+				!checkwug()
+			)
+				setfalcon;
+			break;
+
+		case 2:
+			if (
+				!checkfalcon() &&
+				!checkwug() &&
+				!countitem(6124)
+			)
+				getitem 6124, 1;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Windhawk
+	// 保留 Ranger 系統可用夥伴
+	// ========================================================
+	if (.@job_id == JOB_WINDHAWK) {
+
+		.@choice = select("攜帶獵鷹:取得狼笛:都不要");
+
+		switch(.@choice) {
+
+		case 1:
+			if (
+				getskilllv("HT_FALCON") > 0 &&
+				!checkfalcon() &&
+				!checkwug()
+			)
+				setfalcon;
+			break;
+
+		case 2:
+			if (
+				!checkfalcon() &&
+				!checkwug() &&
+				!countitem(6124)
+			)
+				getitem 6124, 1;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Hunter / Sniper
+	// Falcon
+	// ========================================================
+	if (
+		.@job_id == JOB_HUNTER ||
+		.@job_id == JOB_SNIPER
+	) {
+
+		if (select("攜帶獵鷹:不要攜帶") == 1) {
+			if (
+				getskilllv("HT_FALCON") > 0 &&
+				!checkfalcon() &&
+				!checkwug()
+			)
+				setfalcon;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Rune Knight
+	// Dragon
+	// ========================================================
+	if (.@job_id == JOB_RUNE_KNIGHT) {
+
+		.@dragon = select("綠龍:棕龍:灰龍:藍龍:紅龍:不騎乘");
+
+		switch(.@dragon) {
+		case 1:
+			setdragon(1);
+			break;
+
+		case 2:
+			setdragon(2);
+			break;
+
+		case 3:
+			setdragon(3);
+			break;
+
+		case 4:
+			setdragon(4);
+			break;
+
+		case 5:
+			setdragon(5);
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Dragon Knight
+	// Dragon
+	// ========================================================
+	if (.@job_id == JOB_DRAGON_KNIGHT) {
+
+		.@dragon = select("綠龍:棕龍:灰龍:藍龍:紅龍:不騎乘");
+
+		switch(.@dragon) {
+		case 1:
+			setdragon(1);
+			break;
+
+		case 2:
+			setdragon(2);
+			break;
+
+		case 3:
+			setdragon(3);
+			break;
+
+		case 4:
+			setdragon(4);
+			break;
+
+		case 5:
+			setdragon(5);
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Knight / Crusader / Lord Knight / Paladin
+	// Riding
+	// ========================================================
+	if (
+		.@job_id == JOB_KNIGHT ||
+		.@job_id == JOB_CRUSADER ||
+		.@job_id == JOB_LORD_KNIGHT ||
+		.@job_id == JOB_PALADIN
+	) {
+
+		if (select("騎乘:徒步") == 1) {
+			if (!checkriding())
+				setriding;
+		}
+
+		close;
+	}
+
+close;
+
+OnGMSelfTools:
+	switch (select("完全恢復 HP / SP:解除所有狀態:儲存目前位置:返回儲存點:返回 GM 主菜單")) {
+	case 1:
+		percentheal 100, 100;
+		goto OnGMSelfTools;
+	case 2:
+		sc_end SC_ALL;
+		percentheal 100, 100;
+		goto OnGMSelfTools;
+	case 3:
+		close2;
+		atcommand "@save";
+		end;
+	case 4:
+		warp "SavePoint", 0, 0;
+		end;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMWarpMenu:
+	switch (select("盧恩米德加茲主城:海外與特色城市:異世界與新區域:常用地下城:副本與特殊入口:自訂地圖座標:返回 GM 主菜單")) {
+	case 1: goto OnGMWarpMainCities;
+	case 2: goto OnGMWarpOverseas;
+	case 3: goto OnGMWarpNewWorld;
+	case 4: goto OnGMWarpDungeons;
+	case 5: goto OnGMWarpInstances;
+	case 6: goto OnGMWarpCustom;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMWarpMainCities:
+	switch (select("普隆德拉:伊斯魯得島:吉芬:斐揚:夢羅克:艾爾貝塔:艾爾帕蘭:朱諾:里希塔樂鎮:艾音布羅克:艾音貝赫:毀葛:拉赫:菲音斯:返回傳送分類")) {
+	case 1: warp "prontera", 155, 183; end;
+	case 2: warp "izlude", 128, 146; end;
+	case 3: warp "geffen", 119, 59; end;
+	case 4: warp "payon", 179, 100; end;
+	case 5: warp "morocc", 156, 93; end;
+	case 6: warp "alberta", 28, 234; end;
+	case 7: warp "aldebaran", 140, 131; end;
+	case 8: warp "yuno", 157, 51; end;
+	case 9: warp "lighthalzen", 158, 92; end;
+	case 10: warp "einbroch", 64, 200; end;
+	case 11: warp "einbech", 63, 35; end;
+	case 12: warp "hugel", 96, 145; end;
+	case 13: warp "rachel", 130, 110; end;
+	case 14: warp "veins", 216, 123; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpOverseas:
+	switch (select("天津町:崑崙:洛陽:哎喲泰雅:克魔島:汶巴拉:尼芙菲姆:聖誕村:爪哇咿:莫斯科比亞:巴西:德瓦他:馬來港:馬蘭島:羅札納:返回傳送分類")) {
+	case 1: warp "amatsu", 198, 84; end;
+	case 2: warp "gonryun", 160, 120; end;
+	case 3: warp "louyang", 217, 100; end;
+	case 4: warp "ayothaya", 208, 166; end;
+	case 5: warp "comodo", 209, 143; end;
+	case 6: warp "umbala", 97, 153; end;
+	case 7: warp "niflheim", 202, 174; end;
+	case 8: warp "xmas", 147, 134; end;
+	case 9: warp "jawaii", 251, 132; end;
+	case 10: warp "moscovia", 223, 184; end;
+	case 11: warp "brasilis", 196, 217; end;
+	case 12: warp "dewata", 200, 180; end;
+	case 13: warp "malaya", 231, 200; end;
+	case 14: warp "malangdo", 140, 114; end;
+	case 15: warp "lasagna", 193, 182; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpNewWorld:
+	switch (select("異世界聯合營地:魔怒克:史波浪壯麗:艾爾迪卡斯特:穆拉村:艾克拉珠:岩石山脊:特殊警戒區柯爾:巴爾蒙特宅邸:貝魯茲考古地:灰狼村:冰之城:雷神之錘營地:無名島白天:無名島夜晚:返回傳送分類")) {
+	case 1: warp "mid_camp", 210, 288; end;
+	case 2: warp "manuk", 282, 138; end;
+	case 3: warp "splendide", 201, 147; end;
+	case 4: warp "dicastes01", 198, 187; end;
+	case 5: warp "mora", 55, 146; end;
+	case 6: warp "ecl_in01", 48, 53; end;
+	case 7: warp "harboro1", 298, 206; end;
+	case 8: warp "sp_cor", 160, 166; end;
+	case 9: warp "ba_maison", 72, 146; end;
+	case 10: warp "verus04", 123, 250; end;
+	case 11: warp "wolfvill", 144, 144; end;
+	case 12: warp "icecastle", 185, 212; end;
+	case 13: warp "thor_camp", 246, 68; end;
+	case 14: warp "nameless_i", 256, 215; end;
+	case 15: warp "nameless_n", 256, 215; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpDungeons:
+	switch (select("斐揚地下洞穴:吉芬地下城:獸人地下洞窟:螞蟻地獄:金字塔:史芬克斯:玩具工廠:沉沒之船:烏龜島地下城:古城入口:鐘樓一樓:礦坑一樓:海底洞窟一樓:生體研究所一樓:冰洞穴一樓:火山洞窟一樓:深淵湖一樓:朱諾斯遺跡入口:拉赫神殿一樓:奧丁神殿一樓:死塔一樓:返回傳送分類")) {
+	case 1: warp "pay_dun01", 21, 183; end;
+	case 2: warp "gef_dun01", 115, 236; end;
+	case 3: warp "orcsdun01", 32, 170; end;
+	case 4: warp "anthell01", 35, 262; end;
+	case 5: warp "moc_pryd01", 192, 9; end;
+	case 6: warp "in_sphinx1", 288, 9; end;
+	case 7: warp "xmas_dun01", 205, 15; end;
+	case 8: warp "treasure01", 69, 24; end;
+	case 9: warp "tur_dun01", 154, 49; end;
+	case 10: warp "glast_01", 370, 304; end;
+	case 11: warp "c_tower1", 199, 159; end;
+	case 12: warp "mjo_dun01", 52, 17; end;
+	case 13: warp "iz_dun01", 168, 168; end;
+	case 14: warp "lhz_dun01", 150, 288; end;
+	case 15: warp "ice_dun01", 157, 14; end;
+	case 16: warp "mag_dun01", 126, 68; end;
+	case 17: warp "abyss_01", 261, 272; end;
+	case 18: warp "jupe_cave", 140, 51; end;
+	case 19: warp "ra_san01", 140, 11; end;
+	case 20: warp "odin_tem01", 298, 167; end;
+	case 21: warp "tha_t01", 150, 39; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpInstances:
+	switch (select("無限塔入口:夢魘吉芬入口:幽靈皇宮入口:霧林迷宮入口:恐怖玩具工廠入口:古城副本入口:莎拉與芬里爾入口:莎拉的記憶入口:封印神殿入口:尼德霍格巢穴入口:章魚洞穴入口:魔神之塔入口:返回傳送分類")) {
+	case 1: warp "e_tower", 72, 112; end;
+	case 2: warp "dali", 94, 141; end;
+	case 3: warp "dali02", 46, 128; end;
+	case 4: warp "bif_fild01", 161, 334; end;
+	case 5: warp "xmas", 234, 298; end;
+	case 6: warp "glast_01", 204, 268; end;
+	case 7: warp "dali02", 92, 141; end;
+	case 8: warp "dali", 133, 108; end;
+	case 9: warp "monk_test", 306, 143; end;
+	case 10: warp "nyd_dun02", 95, 193; end;
+	case 11: warp "mal_dun01", 152, 230; end;
+	case 12: warp "dali02", 137, 115; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpCustom:
+	input .@map$;
+	input .@x, 0, 1000;
+	input .@y, 0, 1000;
+	if (select("確定傳送:取消") == 2) {
+		goto OnGMWarpMenu;
+	}
+	warp .@map$, .@x, .@y;
+	end;
+
+OnGMPlayerTools:
+	switch (select("查看線上玩家:移動至指定玩家:返回 GM 主菜單")) {
+	case 1:
+		close2;
+		atcommand "@who";
+		end;
+	case 2:
+		input .@player$;
+		close2;
+		atcommand "@jumpto " + .@player$;
+		end;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMStorageMenu:
+	switch (select("開啟個人倉庫:開啟公會倉庫:返回 GM 主菜單")) {
+	case 1:
+		openstorage;
+		end;
+	case 2:
+		guildopenstorage;
+		end;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMAdminTools:
+	if (getgmlevel() < 99) {
+		close;
+	}
+
+	switch (select("全服廣播:召回指定玩家:踢除指定玩家:建立物品:重載物品資料庫:重載魔物資料庫:重載戰鬥設定:返回 GM 主菜單")) {
+	case 1:
+		input .@message$;
+		if (select("確定送出:取消") == 2) {
+			goto OnGMAdminTools;
+		}
+		close2;
+		atcommand "@broadcast " + .@message$;
+		end;
+	case 2:
+		input .@player$;
+		close2;
+		atcommand "@recall " + .@player$;
+		end;
+	case 3:
+		input .@player$;
+		if (select("確定踢除:取消") == 2) {
+			goto OnGMAdminTools;
+		}
+		close2;
+		atcommand "@kick " + .@player$;
+		end;
+	case 4:
+		input .@item_id, 1, 1000000;
+		input .@amount, 1, 30000;
+		if (select("確定建立:取消") == 2) {
+			goto OnGMAdminTools;
+		}
+		getitem .@item_id, .@amount;
+		goto OnGMAdminTools;
+	case 5:
+		if (select("確定重載:取消") == 2) {
+			goto OnGMAdminTools;
+		}
+		close2;
+		atcommand "@reloaditemdb";
+		end;
+	case 6:
+		if (select("確定重載:取消") == 2) {
+			goto OnGMAdminTools;
+		}
+		close2;
+		atcommand "@reloadmobdb";
+		end;
+	case 7:
+		if (select("確定重載:取消") == 2) {
+			goto OnGMAdminTools;
+		}
+		close2;
+		atcommand "@reloadbattleconf";
+		end;
+	default:
+		goto OnGMMenu;
+	}
+}
