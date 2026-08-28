@@ -91,7 +91,7 @@ OnGMCharacterSetup:
 	if (getgmlevel() < 99)
 		close;
 
-	switch(select("金錢／點數設定:職業切換:坐騎／夥伴:學會全部技能:套用 GM 素質:領取 GM 裝備:返回 GM 主菜單")) {
+	switch(select("金錢／點數設定:職業切換:坐騎／夥伴:學會全部技能:套用 GM 素質:領取 GM 特殊裝備:返回 GM 主菜單")) {
 	case 1:
 		goto OnGMCurrency;
 	case 2:
@@ -122,6 +122,13 @@ OnGMCharacterSetup:
 		getitem 50003, 1;
 		getitem 50004, 1;
 		getitem 50005, 1;
+		getitem 50006, 1;
+		getitem 50007, 1;
+		getitem 50008, 1;
+		getitem 50009, 1;
+		getitem 50010, 1;
+		getitem 50011, 1;
+		getitem 50012, 1;
 		goto OnGMCharacterSetup;
 	default:
 		goto OnGMMenu;
