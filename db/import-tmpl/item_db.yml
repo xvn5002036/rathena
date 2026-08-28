@@ -192,9 +192,10 @@ Body:
       All: true
     Gender: Both
     Locations:
-      Garment: true
+      Costume_Garment: true
     ArmorLevel: 1
     EquipLevelMin: 1
+    View: 175
     Trade:
       NoDrop: true
       NoTrade: true
