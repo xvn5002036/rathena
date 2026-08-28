@@ -87,7 +87,180 @@
 Header:
   Type: ITEM_DB
   Version: 3
-
+Body:
+  # Portable menu GM equipment. IDs 50000-50005 are reserved for this set.
+  - Id: 50000
+    AegisName: Portable_GM_Blade
+    Name: Portable GM Blade
+    Type: Weapon
+    SubType: Dagger
+    Weight: 0
+    Attack: 1000
+    MagicAttack: 1000
+    Range: 1
+    Jobs:
+      All: true
+    Classes:
+      All: true
+    Gender: Both
+    Locations:
+      Right_Hand: true
+    WeaponLevel: 4
+    EquipLevelMin: 1
+    Trade:
+      NoDrop: true
+      NoTrade: true
+      TradePartner: false
+      NoSell: true
+      NoCart: true
+      NoStorage: true
+      NoGuildStorage: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      bonus bAtk,3000;
+      bonus bMatk,3000;
+      bonus bHit,500;
+      bonus bAspdRate,20;
+  - Id: 50001
+    AegisName: Portable_GM_Crown
+    Name: Portable GM Crown
+    Type: Armor
+    Weight: 0
+    Defense: 100
+    Jobs:
+      All: true
+    Classes:
+      All: true
+    Gender: Both
+    Locations:
+      Head_Top: true
+    ArmorLevel: 1
+    EquipLevelMin: 1
+    View: 16
+    Trade:
+      NoDrop: true
+      NoTrade: true
+      NoSell: true
+      NoCart: true
+      NoStorage: true
+      NoGuildStorage: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      bonus bAllStats,100;
+      bonus bMaxHPrate,100;
+      bonus bMaxSPrate,100;
+  - Id: 50002
+    AegisName: Portable_GM_Armor
+    Name: Portable GM Armor
+    Type: Armor
+    Weight: 0
+    Defense: 500
+    Jobs:
+      All: true
+    Classes:
+      All: true
+    Gender: Both
+    Locations:
+      Armor: true
+    ArmorLevel: 1
+    EquipLevelMin: 1
+    Trade:
+      NoDrop: true
+      NoTrade: true
+      NoSell: true
+      NoCart: true
+      NoStorage: true
+      NoGuildStorage: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      bonus bDef,500;
+      bonus bMdef,200;
+      bonus bMaxHPrate,300;
+      bonus bMaxSPrate,300;
+  - Id: 50003
+    AegisName: Portable_GM_Garment
+    Name: Portable GM Garment
+    Type: Armor
+    Weight: 0
+    Defense: 100
+    Jobs:
+      All: true
+    Classes:
+      All: true
+    Gender: Both
+    Locations:
+      Garment: true
+    ArmorLevel: 1
+    EquipLevelMin: 1
+    Trade:
+      NoDrop: true
+      NoTrade: true
+      NoSell: true
+      NoCart: true
+      NoStorage: true
+      NoGuildStorage: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      bonus bFlee,500;
+      bonus bSpeedRate,25;
+  - Id: 50004
+    AegisName: Portable_GM_Boots
+    Name: Portable GM Boots
+    Type: Armor
+    Weight: 0
+    Defense: 100
+    Jobs:
+      All: true
+    Classes:
+      All: true
+    Gender: Both
+    Locations:
+      Shoes: true
+    ArmorLevel: 1
+    EquipLevelMin: 1
+    Trade:
+      NoDrop: true
+      NoTrade: true
+      NoSell: true
+      NoCart: true
+      NoStorage: true
+      NoGuildStorage: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      bonus bMaxHPrate,200;
+      bonus bMaxSPrate,200;
+      bonus bFlee,300;
+  - Id: 50005
+    AegisName: Portable_GM_Accessory
+    Name: Portable GM Accessory
+    Type: Armor
+    Weight: 0
+    Jobs:
+      All: true
+    Classes:
+      All: true
+    Gender: Both
+    Locations:
+      Both_Accessory: true
+    ArmorLevel: 1
+    EquipLevelMin: 1
+    Trade:
+      NoDrop: true
+      NoTrade: true
+      NoSell: true
+      NoCart: true
+      NoStorage: true
+      NoGuildStorage: true
+      NoMail: true
+      NoAuction: true
+    Script: |
+      bonus bAllStats,100;
+      bonus bPerfectHitRate,100;
 #Body:
 # THQ Quest Items
 #=============================================================
