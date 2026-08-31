@@ -1,0 +1,2283 @@
+// Portable menu opened by the custom @menu atcommand.
+-	script	PortableMenu	-1,{
+
+// ============================================================
+// Entry
+// ============================================================
+OnMenu:
+	callsub S_ServerStatus;
+	if (@PM_SettingsSync != 20260903) {
+		@PM_ActualShowExp = getbattleflag("disp_experience");
+		@PM_ActualNoAsk = 0;
+		callsub S_ApplyPlayerSettings;
+		@PM_SettingsSync = 20260903;
+	}
+	if (getgmlevel() > 0)
+		goto OnGMMenu;
+	goto OnPlayerMenu;
+
+OnPCLoginEvent:
+	@PM_ActualShowExp = getbattleflag("disp_experience");
+	@PM_ActualNoAsk = 0;
+	callsub S_ApplyPlayerSettings;
+	@PM_SettingsSync = 20260903;
+	end;
+
+// ============================================================
+// Player menu
+// ============================================================
+OnPlayerMenu:
+	.@back$ = (getgmlevel() > 0) ? "^4B0082◆^000000 返回管理員主選單" : "^555555◆ 關閉選單^000000";
+	.@menu$ = "^8B0000◆^000000 冒險支援:^000080◆^000000 補給商店:";
+	.@type[0] = 1;
+	.@type[1] = 2;
+	.@count = 2;
+	if ($PMServiceActive) {
+		.@menu$ += "^8B4513◆^000000 便捷服務:";
+		.@type[.@count++] = 3;
+	}
+	if ($PMRoleActive) {
+		.@menu$ += "^000080◆^000000 角色服務:";
+		.@type[.@count++] = 4;
+	}
+	if ($PWRefine || $PWGrade || $PWMerge || $PWEnchant || $PWSocket || $PWCardRemove || $PWCardMove || $PWGradeExchange || $PWRepair) {
+		.@menu$ += "^4B0082◆^000000 裝備工坊:";
+		.@type[.@count++] = 5;
+	}
+	if ($PMTravelActive) {
+		.@menu$ += "^006400◆^000000 快速傳送:";
+		.@type[.@count++] = 6;
+	}
+	.@menu$ += "^8B4513◆^000000 個人設定:" + .@back$;
+	.@type[.@count++] = 7;
+	.@choice = select(.@menu$);
+	if (.@choice > .@count) {
+		if (getgmlevel() > 0)
+			goto OnGMMenu;
+		close;
+	}
+	switch(.@type[.@choice - 1]) {
+	case 1: goto OnPlayerSupport;
+	case 2: goto OnPlayerStore;
+	case 3: goto OnPlayerConvenience;
+	case 4: goto OnPlayerRoleService;
+	case 5: goto OnPlayerWorkshop;
+	case 6: goto OnPlayerTravel;
+	case 7: goto OnPlayerSettings;
+	}
+	goto OnPlayerMenu;
+
+OnPlayerSupport:
+	switch(select("^8B0000◆^000000 生命恢復【" + $PMHealFee + "】:^000080◆^000000 儲點返回【" + $PMReturnFee + "】:^8B4513◆^000000 隨身倉庫【" + $PMStorageFee + "】:^006400◆^000000 儲點登錄【" + $PMSaveFee + "】:^4B0082◆^000000 公會倉庫【" + $PMGuildStorageFee + "】:^555555◇ 返回選單^000000")) {
+	case 1:
+		if (Hp >= MaxHp && Sp >= MaxSp) { dispbottom "目前生命與魔力都是全滿狀態。"; goto OnPlayerSupport; }
+		if (select("^8B0000◆^000000 支付 " + $PMHealFee + " 遊戲幣並完全恢復:^555555◇ 取消^000000") != 1) goto OnPlayerSupport;
+		if (Zeny < $PMHealFee) { dispbottom "遊戲幣不足。"; goto OnPlayerSupport; }
+		Zeny -= $PMHealFee;
+		percentheal 100, 100;
+		goto OnPlayerSupport;
+	case 2:
+		if (select("^000080◆^000000 支付 " + $PMReturnFee + " 遊戲幣並返回儲點:^555555◇ 取消^000000") != 1) goto OnPlayerSupport;
+		if (Zeny < $PMReturnFee) { dispbottom "遊戲幣不足。"; goto OnPlayerSupport; }
+		Zeny -= $PMReturnFee;
+		warp "SavePoint", 0, 0;
+		end;
+	case 3:
+		if (Zeny < $PMStorageFee) { dispbottom "遊戲幣不足。"; goto OnPlayerSupport; }
+		Zeny -= $PMStorageFee;
+		openstorage;
+		end;
+	case 4:
+		getmapxy(.@map$,.@x,.@y,BL_PC);
+		if (select("^006400◆^000000 支付 " + $PMSaveFee + " 遊戲幣並登錄目前位置:^555555◇ 取消^000000") != 1) goto OnPlayerSupport;
+		if (Zeny < $PMSaveFee) { dispbottom "遊戲幣不足。"; goto OnPlayerSupport; }
+		Zeny -= $PMSaveFee;
+		savepoint .@map$,.@x,.@y;
+		dispbottom "目前位置已登錄為儲存地點。";
+		goto OnPlayerSupport;
+	case 5:
+		if (getcharid(2) < 1) { dispbottom "目前角色尚未加入公會。"; goto OnPlayerSupport; }
+		if (Zeny < $PMGuildStorageFee) { dispbottom "遊戲幣不足。"; goto OnPlayerSupport; }
+		Zeny -= $PMGuildStorageFee;
+		.@result = guildopenstorage();
+		if (.@result != GSTORAGE_OPEN) {
+			Zeny += $PMGuildStorageFee;
+			dispbottom "無法開啟公會倉庫，費用已退還。";
+			goto OnPlayerSupport;
+		}
+		end;
+	default:
+		goto OnPlayerMenu;
+	}
+
+OnPlayerStore:
+	.@menu$ = "^006400◆^000000 藥水商店 ^8B0000【加價五成】^000000:";
+	.@type[0] = 1;
+	.@count = 1;
+	if ($PMSupplyActive) {
+		.@menu$ += "^8B0000◆^000000 活動補給 ^8B4513【限領一次】^000000:";
+		.@type[.@count++] = 2;
+	}
+	.@menu$ += "^555555◇ 返回選單^000000";
+	.@choice = select(.@menu$);
+	if (.@choice > .@count)
+		goto OnPlayerMenu;
+	if (.@type[.@choice - 1] == 1)
+		goto OnPlayerPotionShop;
+	goto OnPlayerSupply;
+
+OnPlayerConvenience:
+	if (!$PMServiceActive)
+		goto OnPlayerMenu;
+	switch(select("^8B4513◆^000000 全包鑑定【每件 " + $PMIdentifyFee + " 遊戲幣】:^4B0082◆^000000 狀態重整【費用 " + $PMPurifyFee + " 遊戲幣】:^000080◆^000000 角色資訊:^555555◇ 返回選單^000000")) {
+	case 1:
+		.@count = identifyall(0);
+		if (.@count < 1) {
+			dispbottom "背包中沒有需要鑑定的物品。";
+			goto OnPlayerConvenience;
+		}
+		.@fee = .@count * $PMIdentifyFee;
+		if (select("^8B4513◆^000000 鑑定 " + .@count + " 件【合計 " + .@fee + " 遊戲幣】:^555555◇ 取消^000000") != 1)
+			goto OnPlayerConvenience;
+		.@count = identifyall(0);
+		.@fee = .@count * $PMIdentifyFee;
+		if (.@count < 1 || Zeny < .@fee) {
+			dispbottom "物品狀態已改變，或遊戲幣不足。";
+			goto OnPlayerConvenience;
+		}
+		Zeny -= .@fee;
+		identifyall(1);
+		dispbottom "全包鑑定完成，共處理 " + .@count + " 件物品。";
+		goto OnPlayerConvenience;
+	case 2:
+		if (select("^4B0082◆^000000 清除所有增益與異常狀態【" + $PMPurifyFee + " 遊戲幣】:^555555◇ 取消^000000") != 1)
+			goto OnPlayerConvenience;
+		if (Zeny < $PMPurifyFee) {
+			dispbottom "遊戲幣不足，需要 " + $PMPurifyFee + " 遊戲幣。";
+			goto OnPlayerConvenience;
+		}
+		Zeny -= $PMPurifyFee;
+		sc_end SC_ALL;
+		dispbottom "狀態重整完成，所有增益與異常狀態已清除。";
+		goto OnPlayerConvenience;
+	case 3:
+		goto OnPlayerInformation;
+	default:
+		goto OnPlayerMenu;
+	}
+
+OnPlayerInformation:
+	.@weight = (MaxWeight > 0) ? Weight * 100 / MaxWeight : 0;
+	select("^8B4513◆^000000 角色名稱【" + strcharinfo(0) + "】:^000080◆^000000 基本等級【" + BaseLevel + "】:^4B0082◆^000000 職業等級【" + JobLevel + "】:^006400◆^000000 持有金額【" + Zeny + "】:^8B0000◆^000000 負重比例【" + .@weight + "%】:^555555◇ 返回便捷服務^000000");
+	goto OnPlayerConvenience;
+
+OnPlayerRoleService:
+	if (!$PMRoleActive)
+		goto OnPlayerMenu;
+	switch(select("^8B0000◆^000000 素質重置【" + $PMStatResetFee + "】:^4B0082◆^000000 技能重置【" + $PMSkillResetFee + "】:^8B4513◆^000000 髮型變更【" + $PMHairFee + "】:^006400◆^000000 髮色變更【" + $PMHairColorFee + "】:^000080◆^000000 服裝染色【" + $PMClothFee + "】:^555555◇ 返回選單^000000")) {
+	case 1:
+		if (select("^8B0000◆^000000 確定重置全部素質點數【不可復原】:^555555◇ 取消^000000") != 1) goto OnPlayerRoleService;
+		if (Zeny < $PMStatResetFee) { dispbottom "遊戲幣不足。"; goto OnPlayerRoleService; }
+		Zeny -= $PMStatResetFee;
+		resetstatus;
+		dispbottom "素質重置完成。";
+		goto OnPlayerRoleService;
+	case 2:
+		if (select("^4B0082◆^000000 確定重置全部技能點數【不可復原】:^555555◇ 取消^000000") != 1) goto OnPlayerRoleService;
+		if (Zeny < $PMSkillResetFee) { dispbottom "遊戲幣不足。"; goto OnPlayerRoleService; }
+		Zeny -= $PMSkillResetFee;
+		resetskill;
+		dispbottom "技能重置完成。";
+		goto OnPlayerRoleService;
+	case 3:
+		callsub S_PlayerStylePreview,LOOK_HAIR,getbattleflag("max_hair_style"),$PMHairFee,"髮型";
+		goto OnPlayerRoleService;
+	case 4:
+		callsub S_PlayerStylePreview,LOOK_HAIR_COLOR,getbattleflag("max_hair_color"),$PMHairColorFee,"髮色";
+		goto OnPlayerRoleService;
+	case 5:
+		callsub S_PlayerStylePreview,LOOK_CLOTHES_COLOR,getbattleflag("max_cloth_color"),$PMClothFee,"服裝色彩";
+		goto OnPlayerRoleService;
+	default:
+		goto OnPlayerMenu;
+	}
+
+S_PlayerStylePreview:
+	.@look = getarg(0);
+	.@max = getarg(1);
+	.@fee = getarg(2);
+	.@title$ = getarg(3);
+	.@original = getlook(.@look);
+	.@style = (.@original >= 1 && .@original <= .@max) ? .@original : 1;
+	if (.@max < 1) {
+		dispbottom "目前客戶端沒有可用的" + .@title$ + "選項。";
+		return;
+	}
+	setlook .@look,.@style;
+	while (1) {
+		.@choice = select("^006400◆^000000 下一款式【目前 " + .@style + "／" + .@max + "】:^8B4513◆^000000 上一款式【目前 " + .@style + "／" + .@max + "】:^000080◆^000000 指定編號:^4B0082◆^000000 確認套用【費用 " + .@fee + "】:^555555◇ 取消變更^000000");
+		switch(.@choice) {
+		case 1:
+			.@style = (.@style < .@max) ? .@style + 1 : 1;
+			setlook .@look,.@style;
+			break;
+		case 2:
+			.@style = (.@style > 1) ? .@style - 1 : .@max;
+			setlook .@look,.@style;
+			break;
+		case 3:
+			input .@style,1,.@max;
+			setlook .@look,.@style;
+			break;
+		case 4:
+			if (.@style == .@original) {
+				dispbottom .@title$ + "沒有變更，因此不收取費用。";
+				return;
+			}
+			if (Zeny < .@fee) {
+				setlook .@look,.@original;
+				dispbottom "遊戲幣不足，已恢復原本的" + .@title$ + "。";
+				return;
+			}
+			Zeny -= .@fee;
+			dispbottom .@title$ + "變更完成，已支付 " + .@fee + " 遊戲幣。";
+			return;
+		default:
+			setlook .@look,.@original;
+			dispbottom "已取消變更並恢復原本的" + .@title$ + "。";
+			return;
+		}
+	}
+
+OnPlayerPotionShop:
+	callshop "PortablePotionShop", 1;
+	end;
+
+OnPlayerSupply:
+	if (!$PMSupplyActive || $PMSupplyRound < 1)
+		goto OnPlayerMenu;
+	if ($PMSupplyName$ != "")
+		dispbottom "目前活動：" + $PMSupplyName$;
+	.@claimed$ = (#PMSupplyClaimRound == $PMSupplyRound) ? "^8B0000已領取^000000" : "^006400尚未領取^000000";
+	switch(select("^8B0000★^000000 領取活動補給【費用 " + $PMSupplyFee + " 遊戲幣】:^000080◆^000000 查看補給內容:領取狀態【" + .@claimed$ + "】:^555555◇ 返回玩家主選單^000000")) {
+	case 1:
+		if (#PMSupplyClaimRound == $PMSupplyRound) {
+			dispbottom "這一期活動補給已經領取過了。";
+			goto OnPlayerSupply;
+		}
+		if ($PMSupplyCount < 1 || $PMSupplyFee < 1) {
+			dispbottom "目前活動補給尚未設定完成。";
+			goto OnPlayerSupply;
+		}
+		if (Zeny < $PMSupplyFee) {
+			dispbottom "遊戲幣不足，需要 " + $PMSupplyFee + " 遊戲幣。";
+			goto OnPlayerSupply;
+		}
+		.@total_weight = 0;
+		for (.@i = 0; .@i < $PMSupplyCount; .@i++) {
+			if (!checkweight($PMSupplyItem[.@i],$PMSupplyAmount[.@i])) {
+				dispbottom "負重或物品欄空間不足，無法領取。";
+				goto OnPlayerSupply;
+			}
+			.@total_weight += getiteminfo($PMSupplyItem[.@i],ITEMINFO_WEIGHT) * $PMSupplyAmount[.@i];
+		}
+		if (Weight + .@total_weight > MaxWeight) {
+			dispbottom "總負重不足，請整理背包後再領取。";
+			goto OnPlayerSupply;
+		}
+		if (select("^8B0000確定支付 " + $PMSupplyFee + " 遊戲幣並領取^000000:^555555取消^000000") != 1)
+			goto OnPlayerSupply;
+		if (!$PMSupplyActive || #PMSupplyClaimRound == $PMSupplyRound || Zeny < $PMSupplyFee)
+			goto OnPlayerSupply;
+		Zeny -= $PMSupplyFee;
+		for (.@i = 0; .@i < $PMSupplyCount; .@i++)
+			getitem $PMSupplyItem[.@i],$PMSupplyAmount[.@i];
+		#PMSupplyClaimRound = $PMSupplyRound;
+		dispbottom "活動補給領取成功，已支付 " + $PMSupplyFee + " 遊戲幣。";
+		goto OnPlayerSupply;
+	case 2:
+		dispbottom "【" + $PMSupplyName$ + "】活動補給內容：";
+		for (.@i = 0; .@i < $PMSupplyCount; .@i++) {
+			.@name$ = "";
+			query_sql "SELECT `display_name` FROM `client_item_names` WHERE `item_id` = " + $PMSupplyItem[.@i], .@name$;
+			if (.@name$ == "") .@name$ = getitemname($PMSupplyItem[.@i]);
+			dispbottom "◆ " + .@name$ + " × " + $PMSupplyAmount[.@i];
+		}
+		goto OnPlayerSupply;
+	case 3:
+		if (#PMSupplyClaimRound == $PMSupplyRound)
+			dispbottom "本期已領取。";
+		else
+			dispbottom "本期尚未領取。";
+		goto OnPlayerSupply;
+	default:
+		goto OnPlayerMenu;
+	}
+
+OnPlayerTravel:
+	switch(select("^8B4513◆^000000 城鎮傳送【" + $PMTravelTownFee + " 遊戲幣】:^006400◆^000000 練功區傳送【" + $PMTravelFieldFee + " 遊戲幣】:^4B0082◆^000000 地下城傳送【" + $PMTravelDungeonFee + " 遊戲幣】:^555555◇ 返回玩家主選單^000000")) {
+	case 1: goto OnPlayerTravelTown;
+	case 2: goto OnPlayerTravelField;
+	case 3: goto OnPlayerTravelDungeon;
+	default: goto OnPlayerMenu;
+	}
+
+OnPlayerTravelTown:
+	.@c = select("^8B4513◆^000000 普隆德拉:^000080◆^000000 吉芬:^006400◆^000000 斐揚:^8B4513◆^000000 夢羅克:^000080◆^000000 艾爾貝塔:^4B0082◆^000000 艾爾帕蘭:^8B4513◆^000000 朱諾:^8B0000◆^000000 里希塔樂鎮:^006400◆^000000 艾音布羅克:^4B0082◆^000000 拉赫:^555555◇ 返回傳送分類^000000");
+	if (.@c == 11) goto OnPlayerTravel;
+	setarray .@map$[1],"prontera","geffen","payon","morocc","alberta","aldebaran","yuno","lighthalzen","einbroch","rachel";
+	setarray .@x[1],156,119,162,160,117,140,157,158,64,130;
+	setarray .@y[1],191,59,233,94,56,131,51,92,200,110;
+	callsub S_PlayerPaidWarp,.@map$[.@c],.@x[.@c],.@y[.@c],$PMTravelTownFee;
+	goto OnPlayerTravelTown;
+
+OnPlayerTravelField:
+	.@c = select("^006400◆^000000 波利草原:^006400◆^000000 斐揚樹林:^8B4513◆^000000 夢羅克沙漠:^8B0000◆^000000 獸人地下洞窟:^4B0082◆^000000 斐揚地下洞穴:^000080◆^000000 普隆德拉地下水道:^8B4513◆^000000 妙勒尼山脈:^555555◇ 返回傳送分類^000000");
+	if (.@c == 8) goto OnPlayerTravel;
+	setarray .@map$[1],"prt_fild08","pay_fild08","moc_fild12","orcsdun01","pay_dun00","prt_sewb1","mjolnir_02";
+	setarray .@x[1],170,80,170,32,21,131,90;
+	setarray .@y[1],371,350,280,170,183,248,190;
+	callsub S_PlayerPaidWarp,.@map$[.@c],.@x[.@c],.@y[.@c],$PMTravelFieldFee;
+	goto OnPlayerTravelField;
+
+OnPlayerTravelDungeon:
+	.@c = select("^4B0082◆^000000 吉芬地下城:^8B4513◆^000000 金字塔迷宮:^8B4513◆^000000 史芬克斯:^000080◆^000000 海底洞窟:^555555◆^000000 古城入口:^8B4513◆^000000 鐘樓一樓:^4B0082◆^000000 死亡之塔:^000080◆^000000 冰洞穴:^8B0000◆^000000 火山洞窟:^006400◆^000000 生體研究所:^555555◇ 返回傳送分類^000000");
+	if (.@c == 11) goto OnPlayerTravel;
+	setarray .@map$[1],"gef_dun00","moc_pryd01","in_sphinx1","iz_dun00","glast_01","c_tower1","tha_t01","ice_dun01","thor_v01","lhz_dun01";
+	setarray .@x[1],104,192,288,168,199,199,150,157,21,149;
+	setarray .@y[1],99,9,9,168,294,159,74,14,227,291;
+	callsub S_PlayerPaidWarp,.@map$[.@c],.@x[.@c],.@y[.@c],$PMTravelDungeonFee;
+	goto OnPlayerTravelDungeon;
+
+S_PlayerPaidWarp:
+	.@map$ = getarg(0); .@x = getarg(1); .@y = getarg(2); .@fee = getarg(3);
+	if (!$PMTravelActive || .@fee < 1) return;
+	if (Zeny < .@fee) { dispbottom "遊戲幣不足，需要 " + .@fee + " 遊戲幣。"; return; }
+	if (select("^8B0000◆^000000 確定支付 " + .@fee + " 遊戲幣並傳送:^555555◇ 取消^000000") != 1) return;
+	if (!$PMTravelActive || Zeny < .@fee) return;
+	Zeny -= .@fee;
+	warp .@map$,.@x,.@y;
+	end;
+
+OnPlayerWorkshop:
+	.@menu$ = "";
+	.@count = 0;
+	if ($PWRefine) { .@menu$ += "^8B4513◆^000000 裝備精煉:"; .@type[.@count++] = 1; }
+	if ($PWGrade) { .@menu$ += "^8B0000◆^000000 裝備階級強化:"; .@type[.@count++] = 2; }
+	if ($PWMerge) { .@menu$ += "^000080◆^000000 物品合成:"; .@type[.@count++] = 3; }
+	if ($PWEnchant) { .@menu$ += "^4B0082★^000000 台版風格裝備附魔:"; .@type[.@count++] = 9; }
+	if ($PWSocket) { .@menu$ += "^000080◆^000000 裝備打洞:"; .@type[.@count++] = 4; }
+	if ($PWCardRemove) { .@menu$ += "^8B0000◆^000000 卡片拆卸:"; .@type[.@count++] = 5; }
+	if ($PWCardMove) { .@menu$ += "^006400◆^000000 購買移卡券:"; .@type[.@count++] = 6; }
+	if ($PWGradeExchange) { .@menu$ += "^8B4513◆^000000 階級材料交換:"; .@type[.@count++] = 7; }
+	if ($PWRepair) { .@menu$ += "^006400◆^000000 修理損壞裝備:"; .@type[.@count++] = 8; }
+	if (!.@count)
+		goto OnPlayerMenu;
+	.@menu$ += "^555555◇ 返回玩家主選單^000000";
+	.@choice = select(.@menu$);
+	if (.@choice > .@count)
+		goto OnPlayerMenu;
+	switch(.@type[.@choice - 1]) {
+	case 1:
+		refineui();
+		end;
+	case 2:
+		enchantgradeui();
+		end;
+	case 3:
+		mergeitem;
+		goto OnPlayerWorkshop;
+	case 4:
+		goto OnPlayerSocket;
+	case 5:
+		goto OnPlayerCardRemove;
+	case 6:
+		callshop "change_slot#slo";
+		end;
+	case 7:
+		callshop "EnchantGradeExchange";
+		end;
+	case 8:
+		goto OnPlayerRepair;
+	case 9:
+		goto OnPlayerEnchant;
+	default:
+		goto OnPlayerMenu;
+	}
+
+OnPlayerEnchant:
+	setarray .@pos[0],EQI_HEAD_TOP,EQI_ARMOR,EQI_HAND_L,EQI_HAND_R,EQI_GARMENT,EQI_SHOES,EQI_ACC_L,EQI_ACC_R,EQI_HEAD_MID,EQI_HEAD_LOW;
+	setarray .@pname$[0],"頭部上段","身體裝備","左手裝備","右手裝備","披肩裝備","鞋子裝備","左側飾品","右側飾品","頭部中段","頭部下段";
+	setarray .@pcolor$[0],"^8B4513◆^000000 ","^8B0000◆^000000 ","^006400◆^000000 ","^006400◆^000000 ","^4B0082◆^000000 ","^000080◆^000000 ","^8B4513◆^000000 ","^8B4513◆^000000 ","^8B4513◆^000000 ","^8B4513◆^000000 ";
+	.@menu$ = "";
+	.@count = 0;
+	for (.@i = 0; .@i < 10; .@i++) {
+		if (!getequipisequiped(.@pos[.@i]))
+			continue;
+		.@id = getequipid(.@pos[.@i]);
+		.@name$ = "";
+		// SQL stores UTF-8 names, while this client uses Big5. Return raw Big5 bytes
+		// so Chinese names are not converted into question marks by the SQL connection.
+		query_sql "SELECT CAST(CONVERT(`display_name` USING big5) AS BINARY) FROM `client_item_names` WHERE `item_id` = " + .@id, .@name$;
+		if (.@name$ == "" || .@name$ == "???" || .@name$ == "????")
+			.@name$ = "物品編號 " + .@id;
+		// Chinese display names for the custom portable GM equipment.
+		if (.@name$ == "Portable GM Armor") .@name$ = "可攜式管理員鎧甲";
+		else if (.@name$ == "Portable GM Blade") .@name$ = "可攜式管理員之刃";
+		else if (.@name$ == "Portable GM Shield") .@name$ = "可攜式管理員盾牌";
+		else if (.@name$ == "Portable GM Garment") .@name$ = "可攜式管理員披肩";
+		else if (.@name$ == "Portable GM Boots") .@name$ = "可攜式管理員戰靴";
+		else if (.@name$ == "Portable GM Accessory") .@name$ = "可攜式管理員飾品";
+		.@menu$ += .@pcolor$[.@i] + .@pname$[.@i] + " ^555555【" + .@name$ + "】^000000:";
+		.@part[.@count++] = .@pos[.@i];
+	}
+	if (!.@count) {
+		dispbottom "請先穿上要附魔的裝備。";
+		goto OnPlayerWorkshop;
+	}
+	.@menu$ += "^555555◇ 返回高級裝備工坊^000000";
+	.@choice = select(.@menu$);
+	if (.@choice > .@count) goto OnPlayerWorkshop;
+	.@part = .@part[.@choice - 1];
+	.@item = getequipid(.@part);
+	.@slot = select("附魔第 1 欄【500,000 遊戲幣／材料 1】:附魔第 2 欄【1,000,000 遊戲幣／材料 5】:附魔第 3 欄【2,000,000 遊戲幣／材料 10】:取消") - 1;
+	if (.@slot == 3) goto OnPlayerEnchant;
+	setarray .@fee[0],500000,1000000,2000000;
+	setarray .@amount[0],1,5,10;
+	.@material = (getiteminfo(.@item,ITEMINFO_TYPE) == IT_WEAPON) ? 984 : 985;
+	.@material_name$ = (.@material == 984) ? "神之金屬" : "鋁";
+	.@style = select("^8B0000◆^000000 物理攻擊型:^4B0082◆^000000 魔法攻擊型:^006400◆^000000 生存防禦型:^8B4513◆^000000 基礎能力型:^555555◇ 取消^000000");
+	if (.@style == 5) goto OnPlayerEnchant;
+	if (select("確定重洗此附魔欄｜原能力會被覆蓋:取消") != 1) goto OnPlayerEnchant;
+	if (Zeny < .@fee[.@slot] || countitem(.@material) < .@amount[.@slot]) {
+		dispbottom "附魔材料不足：需要 " + .@fee[.@slot] + " 遊戲幣與" + .@material_name$ + " " + .@amount[.@slot] + " 個。";
+		goto OnPlayerEnchant;
+	}
+	// Recheck the equipped item after all menus to prevent equipment swapping exploits.
+	if (!getequipisequiped(.@part) || getequipid(.@part) != .@item) {
+		dispbottom "裝備狀態已改變，請重新操作。";
+		goto OnPlayerEnchant;
+	}
+	Zeny -= .@fee[.@slot];
+	delitem .@material,.@amount[.@slot];
+	if (.@style == 1) {
+		setarray .@oid[0],RDMOPT_VAR_ATKPERCENT,RDMOPT_VAR_ATTPOWER,RDMOPT_VAR_HITSUCCESSVALUE,RDMOPT_VAR_CRITICALSUCCESSVALUE,RDMOPT_VAR_PLUSASPDPERCENT;
+		setarray .@oname$[0],"物理攻擊力百分比","物理攻擊力","命中率","暴擊率","攻擊速度";
+		.@pick = rand(5);
+		.@value = (.@pick == 1 || .@pick == 2 || .@pick == 3) ? rand(5,21) : rand(1,8);
+		.@suffix$ = (.@pick == 0 || .@pick == 4) ? "%" : "";
+	}
+	else if (.@style == 2) {
+		setarray .@oid[0],RDMOPT_VAR_MAGICATKPERCENT,RDMOPT_VAR_ATTMPOWER,RDMOPT_VAR_MAXSPPERCENT,RDMOPT_VAR_INTAMOUNT,RDMOPT_VAR_DEXAMOUNT;
+		setarray .@oname$[0],"魔法攻擊力百分比","魔法攻擊力","最大魔力值","智力","靈巧";
+		.@pick = rand(5);
+		.@value = (.@pick == 1) ? rand(5,21) : rand(1,8);
+		.@suffix$ = (.@pick == 0 || .@pick == 2) ? "%" : "";
+	}
+	else if (.@style == 3) {
+		setarray .@oid[0],RDMOPT_VAR_MAXHPPERCENT,RDMOPT_VAR_ITEMDEFPOWER,RDMOPT_VAR_MDEFPOWER,RDMOPT_VAR_AVOIDSUCCESSVALUE,RDMOPT_VAR_VITAMOUNT;
+		setarray .@oname$[0],"最大生命值","物理防禦力","魔法防禦力","迴避率","體力";
+		.@pick = rand(5);
+		.@value = (.@pick == 1 || .@pick == 2 || .@pick == 3) ? rand(5,21) : rand(1,8);
+		.@suffix$ = (.@pick == 0) ? "%" : "";
+	}
+	else {
+		setarray .@oid[0],RDMOPT_VAR_STRAMOUNT,RDMOPT_VAR_AGIAMOUNT,RDMOPT_VAR_VITAMOUNT,RDMOPT_VAR_INTAMOUNT,RDMOPT_VAR_DEXAMOUNT,RDMOPT_VAR_LUKAMOUNT;
+		setarray .@oname$[0],"力量","敏捷","體力","智力","靈巧","幸運";
+		.@pick = rand(6);
+		.@value = rand(1,8);
+		.@suffix$ = "";
+	}
+	setrandomoption .@part,.@slot,.@oid[.@pick],.@value,0;
+	.@result$ = "第 " + (.@slot + 1) + " 欄附魔完成｜^00AA00" + .@oname$[.@pick] + " +" + .@value + .@suffix$ + "^000000";
+	dispbottom "附魔完成：" + .@oname$[.@pick] + " +" + .@value + .@suffix$ + "。";
+	select(.@result$ + ":繼續附魔");
+	goto OnPlayerEnchant;
+
+OnPlayerSocket:
+	switch(select("武器打洞:防具打洞:太陽神頭盔特殊打洞:返回高級裝備工坊")) {
+	case 1: goto OnSocketWeapon;
+	case 2: goto OnSocketArmor;
+	case 3: callsub S_SocketApply,5022,5353,4,95,200000,969,2; goto OnPlayerSocket;
+	default: goto OnPlayerWorkshop;
+	}
+
+OnSocketWeapon:
+	switch(select("C 級武器:B 級武器:A 級武器:S 級武器:返回打洞選單")) {
+	case 1:
+		switch(select("地靈之書:水靈之書:風靈之書:火靈之書:返回")) {
+		case 1: callsub S_SocketApply,1554,1569,40,66,200,1010,10; break;
+		case 2: callsub S_SocketApply,1553,1568,40,66,200,1010,10; break;
+		case 3: callsub S_SocketApply,1556,1571,40,66,200,1010,10; break;
+		case 4: callsub S_SocketApply,1555,1570,40,66,200,1010,10; break;
+		default: goto OnSocketWeapon;
+		}
+		goto OnSocketWeapon;
+	case 2:
+		switch(select("獸人斧:彎刀:尖刃鐵錘:返回")) {
+		case 1: callsub S_SocketApply,1304,1309,40,66,200,984,1; break;
+		case 2: callsub S_SocketApply,1113,1114,40,66,200,984,1; break;
+		case 3: callsub S_SocketApply,1523,1538,40,61,300,984,1; break;
+		default: goto OnSocketWeapon;
+		}
+		goto OnSocketWeapon;
+	case 3:
+		.@c = select("龍牙劍:地靈拳刃:火靈拳刃:冰靈拳刃:風靈拳刃:黃金之錘:東方琵琶:女王的鞭子:妖怪長槍:風靈之矛:施魏澤劍:返回");
+		if (.@c == 12) goto OnSocketWeapon;
+		setarray .@src[1],13001,1257,1258,1256,1259,1524,1918,1970,1477,1474,1167;
+		setarray .@dst[1],13030,1276,1277,1275,1278,1539,1922,1976,1479,1480,1178;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,(.@c < 6 ? 66 : (.@c < 9 || .@c == 11 ? 61 : 56)),500,984,2;
+		goto OnSocketWeapon;
+	case 4:
+		.@c = select("風靈之矛:破甲短錐:屠龍劍:破錐短劍:刺客短劍:聖十字之錘:處刑者之劍:返回");
+		if (.@c == 8) goto OnSocketWeapon;
+		setarray .@src[1],1468,1225,1166,1224,1232,1528,1169;
+		setarray .@dst[1],1481,13032,1180,13031,13033,1540,1179;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,51,1000,984,5,999,10;
+		goto OnSocketWeapon;
+	default: goto OnPlayerSocket;
+	}
+
+OnSocketArmor:
+	switch(select("C 級防具:B 級防具:A 級防具:S 級防具:返回打洞選單")) {
+	case 1:
+		.@c = select("向日葵髮夾:博士帽:大髮帶:男孩帽:返回");
+		if (.@c == 5) goto OnSocketArmor;
+		setarray .@src[1],2253,5012,2244,5016;
+		setarray .@dst[1],5351,5347,5348,5349;
+		setarray .@amt[1],3,3,5,5;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,66,100,999,.@amt[.@c];
+		goto OnSocketArmor;
+	case 2:
+		.@c = select("骷髏戒指:高跟鞋:返回");
+		if (.@c == 3) goto OnSocketArmor;
+		setarray .@src[1],2609,2409;
+		setarray .@dst[1],2715,2432;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],40,61,300,999,5;
+		goto OnSocketArmor;
+	case 3:
+		.@c = select("海盜頭巾:黑皮靴:返回");
+		if (.@c == 3) goto OnSocketArmor;
+		if (.@c == 1) callsub S_SocketApply,2287,5350,50,61,500,985,1;
+		else callsub S_SocketApply,2425,2434,40,51,500,985,1;
+		goto OnSocketArmor;
+	case 4:
+		.@c = select("魔法外套:神聖長袍:聖職之袍:三角褲:襯衫:返回");
+		if (.@c == 6) goto OnSocketArmor;
+		setarray .@src[1],2334,2327,2111,2522,2339;
+		setarray .@dst[1],2372,2373,2128,2523,2371;
+		callsub S_SocketApply,.@src[.@c],.@dst[.@c],(.@c == 1 ? 40 : 45),51,1000,985,1;
+		goto OnSocketArmor;
+	default: goto OnPlayerSocket;
+	}
+
+S_SocketApply:
+	.@src = getarg(0); .@dst = getarg(1); .@low = getarg(2); .@high = getarg(3);
+	.@fee = getarg(4) * 1000; .@mat1 = getarg(5); .@amt1 = getarg(6);
+	.@mat2 = getarg(7,0); .@amt2 = getarg(8,0);
+	.@confirm$ = getitemname(.@src) + " → " + getitemname(.@dst) + "｜費用 " + .@fee + " Zeny｜確定:";
+	.@confirm$ += "取消";
+	if (select(.@confirm$) != 1) return;
+	if (!checkweight(.@dst,1)) { dispbottom "負重或物品欄空間不足。"; return; }
+	if (Zeny < .@fee || countitem(.@src) < 1 || countitem(.@mat1) < .@amt1 || (.@mat2 && countitem(.@mat2) < .@amt2)) {
+		dispbottom "Zeny、原裝備或打洞材料不足。";
+		return;
+	}
+	delitem .@src,1;
+	delitem .@mat1,.@amt1;
+	if (.@mat2) delitem .@mat2,.@amt2;
+	Zeny -= .@fee;
+	.@roll = rand(1,100);
+	if (.@roll > .@low && .@roll < .@high) {
+		getitem .@dst,1;
+		dispbottom "打洞成功：已取得 " + getitemname(.@dst) + "。";
+	}
+	else
+		dispbottom "打洞失敗：裝備、材料與費用已消耗。";
+	return;
+
+OnPlayerCardRemove:
+	setarray .@pos[0],EQI_HEAD_TOP,EQI_ARMOR,EQI_HAND_L,EQI_HAND_R,EQI_GARMENT,EQI_SHOES,EQI_ACC_L,EQI_ACC_R,EQI_HEAD_MID,EQI_HEAD_LOW;
+	.@menu$ = ""; .@count = 0;
+	for (.@i = 0; .@i < 10; .@i++) {
+		if (getequipisequiped(.@pos[.@i]) && getequipcardcnt(.@pos[.@i]) > 0) {
+			.@menu$ += F_getpositionname(.@pos[.@i]) + "【" + getequipname(.@pos[.@i]) + "】:";
+			.@part[.@count++] = .@pos[.@i];
+		}
+	}
+	if (!.@count) { dispbottom "目前穿戴中的裝備沒有可拆卸卡片。"; goto OnPlayerWorkshop; }
+	.@menu$ += "返回高級裝備工坊";
+	.@choice = select(.@menu$);
+	if (.@choice > .@count) goto OnPlayerWorkshop;
+	.@part = .@part[.@choice - 1];
+	.@cards = getequipcardcnt(.@part);
+	.@fee = 200000 + .@cards * 25000;
+	.@safe = select("保留裝備優先｜" + .@fee + " Zeny:保留卡片優先｜" + .@fee + " Zeny:取消");
+	if (.@safe == 3) goto OnPlayerCardRemove;
+	if (Zeny < .@fee || countitem(1000) < 1 || countitem(715) < 1) {
+		dispbottom "需要 " + .@fee + " Zeny、星星的角 1 個及黃寶石 1 個。";
+		goto OnPlayerCardRemove;
+	}
+	if (!checkweight(1202,.@cards + 1)) { dispbottom "負重或物品欄空間不足。"; goto OnPlayerCardRemove; }
+	Zeny -= .@fee; delitem 1000,1; delitem 715,1;
+	.@roll = rand(100);
+	if (.@roll < 2) { failedremovecards .@part,0; dispbottom "拆卡完全失敗：裝備與卡片皆損毀。"; }
+	else if (.@roll < 8 && .@safe == 1) { failedremovecards .@part,1; dispbottom "拆卡部分失敗：裝備保留、卡片損毀。"; }
+	else if (.@roll < 8 && .@safe == 2) { failedremovecards .@part,2; dispbottom "拆卡部分失敗：卡片保留、裝備損毀。"; }
+	else if (.@roll < 10) { failedremovecards .@part,3; dispbottom "拆卡失敗：裝備與卡片保留，費用不退。"; }
+	else { successremovecards .@part; dispbottom "拆卡成功，裝備與卡片均已保留。"; }
+	goto OnPlayerCardRemove;
+
+OnPlayerRepair:
+	.@count = 0;
+	while (getbrokenid(.@count + 1)) .@count++;
+	if (!.@count) { dispbottom "目前沒有損壞的裝備。"; goto OnPlayerWorkshop; }
+	.@fee = .@count * 5000;
+	if (select("修理 " + .@count + " 件裝備｜費用 " + .@fee + " Zeny:取消") != 1) goto OnPlayerWorkshop;
+	.@verify = 0;
+	while (getbrokenid(.@verify + 1)) .@verify++;
+	if (.@verify != .@count) { dispbottom "損壞裝備數量已變更，請重新操作。"; goto OnPlayerWorkshop; }
+	if (Zeny < .@fee) { dispbottom "Zeny 不足，需要 " + .@fee + " Zeny。"; goto OnPlayerWorkshop; }
+	Zeny -= .@fee;
+	while (.@count) { repair(.@count); .@count--; }
+	dispbottom "裝備修理完成，已支付 " + .@fee + " Zeny。";
+	goto OnPlayerWorkshop;
+
+OnPlayerSettings:
+	.@menu$ = "^000080◆^000000 自動拾取【" + (#PM_Autoloot ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^006400◆^000000 拾取清單【" + #PM_LootCount + "／10】:";
+	.@menu$ += "^4B0082◆^000000 經驗顯示【" + (!#PM_ShowExp ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^8B0000◆^000000 拒絕邀請【" + (#PM_NoAsk ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^006400◆^000000 密碼變更:";
+	.@menu$ += "^555555◇ 返回玩家主選單^000000";
+
+	switch(select(.@menu$)) {
+	case 1:
+		#PM_Autoloot = !#PM_Autoloot;
+		callsub S_ApplyPlayerAutoLoot;
+		goto OnPlayerSettings;
+	case 2:
+		goto OnPlayerLootManage;
+	case 3:
+		#PM_ShowExp = !#PM_ShowExp;
+		callsub S_ApplyPlayerSettings;
+		goto OnPlayerSettings;
+	case 4:
+		#PM_NoAsk = !#PM_NoAsk;
+		callsub S_ApplyPlayerSettings;
+		goto OnPlayerSettings;
+	case 5:
+		goto OnPlayerPassword;
+	default:
+		goto OnPlayerMenu;
+	}
+
+S_ApplyPlayerSettings:
+	callsub S_ApplyPlayerAutoLoot;
+	.@wanted_exp = !#PM_ShowExp;
+	if (@PM_ActualShowExp != .@wanted_exp) {
+		atcommand "@showexp";
+		@PM_ActualShowExp = .@wanted_exp;
+	}
+	if (@PM_ActualNoAsk != #PM_NoAsk) {
+		atcommand "@noask";
+		@PM_ActualNoAsk = #PM_NoAsk;
+	}
+	return;
+
+OnPlayerLootManage:
+	if (#PM_LootCount < 0 || #PM_LootCount > 10)
+		#PM_LootCount = 0;
+	.@mode$ = !#PM_Autoloot ? "^8B0000完全關閉^000000" : (#PM_LootCount > 0 ? "^006400指定物品^000000" : "^006400全部物品^000000");
+	switch(select("^000080◆^000000 拾取模式【" + .@mode$ + "】:^006400◆^000000 新增物品:^8B4513◆^000000 移除物品:^4B0082◆^000000 查看清單:^8B0000◆^000000 清空清單:^555555◇ 返回個人設定^000000")) {
+	case 1:
+		dispbottom "關閉時不撿取；開啟且清單為空時撿全部；清單有物品時只撿指定物品。";
+		goto OnPlayerLootManage;
+	case 2:
+		if (#PM_LootCount >= 10) {
+			dispbottom "拾取清單已滿，最多可設定 10 種物品。";
+			goto OnPlayerLootManage;
+		}
+		dispbottom "請輸入要自動拾取的物品編號。";
+		input .@item,1,1000000;
+		if (getitemname(.@item) == "null") {
+			dispbottom "找不到這個物品編號。";
+			goto OnPlayerLootManage;
+		}
+		.@name$ = "";
+		query_sql "SELECT CAST(CONVERT(`display_name` USING big5) AS BINARY) FROM `client_item_names` WHERE `item_id` = " + .@item,.@name$;
+		if (.@name$ == "" || .@name$ == "???") .@name$ = "物品編號 " + .@item;
+		for (.@i = 0; .@i < #PM_LootCount; .@i++) {
+			if (#PM_LootItem[.@i] == .@item) {
+				dispbottom "這個物品已經在拾取清單中。";
+				goto OnPlayerLootManage;
+			}
+		}
+		if (select("^006400◆^000000 " + mesitemicon(.@item,.@name$) + " " + .@name$ + "【編號 " + .@item + "】:^555555◇ 取消加入^000000") != 1)
+			goto OnPlayerLootManage;
+		#PM_LootItem[#PM_LootCount] = .@item;
+		#PM_LootCount++;
+		callsub S_ApplyPlayerAutoLoot;
+		dispbottom "已加入物品編號 " + .@item + "，目前只會拾取清單內的物品。";
+		goto OnPlayerLootManage;
+	case 3:
+		if (#PM_LootCount < 1) {
+			dispbottom "拾取清單目前是空的。";
+			goto OnPlayerLootManage;
+		}
+		.@menu$ = "";
+		for (.@i = 0; .@i < #PM_LootCount; .@i++) {
+			.@name$ = "";
+			query_sql "SELECT CAST(CONVERT(`display_name` USING big5) AS BINARY) FROM `client_item_names` WHERE `item_id` = " + #PM_LootItem[.@i],.@name$;
+			if (.@name$ == "" || .@name$ == "???") .@name$ = "物品編號 " + #PM_LootItem[.@i];
+			.@menu$ += "^8B4513◆^000000 " + mesitemicon(#PM_LootItem[.@i],.@name$) + " " + .@name$ + "【編號 " + #PM_LootItem[.@i] + "】:";
+		}
+		.@menu$ += "^555555◇ 取消移除^000000";
+		.@choice = select(.@menu$);
+		if (.@choice > #PM_LootCount) goto OnPlayerLootManage;
+		.@removed = #PM_LootItem[.@choice - 1];
+		for (.@i = .@choice - 1; .@i < #PM_LootCount - 1; .@i++)
+			#PM_LootItem[.@i] = #PM_LootItem[.@i + 1];
+		#PM_LootCount--;
+		#PM_LootItem[#PM_LootCount] = 0;
+		callsub S_ApplyPlayerAutoLoot;
+		dispbottom "已移除物品編號 " + .@removed + "。";
+		goto OnPlayerLootManage;
+	case 4:
+		if (#PM_LootCount < 1) {
+			dispbottom "拾取清單是空的；開關開啟時會撿取全部物品。";
+			goto OnPlayerLootManage;
+		}
+		.@menu$ = "";
+		for (.@i = 0; .@i < #PM_LootCount; .@i++) {
+			.@name$ = "";
+			query_sql "SELECT CAST(CONVERT(`display_name` USING big5) AS BINARY) FROM `client_item_names` WHERE `item_id` = " + #PM_LootItem[.@i],.@name$;
+			if (.@name$ == "" || .@name$ == "???") .@name$ = "物品編號 " + #PM_LootItem[.@i];
+			.@menu$ += "^006400◆^000000 " + mesitemicon(#PM_LootItem[.@i],.@name$) + " " + .@name$ + "【編號 " + #PM_LootItem[.@i] + "]:";
+		}
+		.@menu$ += "^555555◇ 返回拾取設定^000000";
+		select(.@menu$);
+		goto OnPlayerLootManage;
+	case 5:
+		if (#PM_LootCount < 1) goto OnPlayerLootManage;
+		if (select("^8B0000◆^000000 確定清空拾取清單:^555555◇ 取消^000000") != 1) goto OnPlayerLootManage;
+		deletearray #PM_LootItem;
+		#PM_LootCount = 0;
+		callsub S_ApplyPlayerAutoLoot;
+		dispbottom "拾取清單已清空；開關開啟時將撿取全部物品。";
+		goto OnPlayerLootManage;
+	default:
+		goto OnPlayerSettings;
+	}
+
+S_ApplyPlayerAutoLoot:
+	atcommand "@alootid reset";
+	atcommand "@autoloot 0";
+	if (!#PM_Autoloot)
+		return;
+	if (#PM_LootCount < 1) {
+		atcommand "@autoloot 100";
+		return;
+	}
+	for (.@i = 0; .@i < #PM_LootCount && .@i < 10; .@i++)
+		atcommand "@alootid +" + #PM_LootItem[.@i];
+	return;
+
+OnPlayerPassword:
+	dispbottom "請輸入目前登入密碼；輸入內容不會顯示在聊天紀錄。";
+	input .@old$;
+	dispbottom "請輸入 1 至 23 位英文字母或數字的新密碼。";
+	input .@new$;
+	dispbottom "請再次輸入新密碼。";
+	input .@confirm$;
+	if (getstrlen(.@new$) < 1 || getstrlen(.@new$) > 23 || !preg_match("^[A-Za-z0-9]+$",.@new$)) {
+		dispbottom "新密碼格式不符，限 1 至 23 位英文字母或數字。";
+		goto OnPlayerPasswordDone;
+	}
+	if (strcmp(.@new$,.@confirm$) != 0) {
+		dispbottom "兩次輸入的新密碼不同，密碼沒有變更。";
+		goto OnPlayerPasswordDone;
+	}
+	if (strcmp(.@old$,.@new$) == 0) {
+		dispbottom "新密碼不能和目前密碼相同。";
+		goto OnPlayerPasswordDone;
+	}
+	.@account = getcharid(3);
+	.@stored$ = "";
+	query_sql "SELECT `user_pass` FROM `login` WHERE `account_id` = " + .@account + " LIMIT 1",.@stored$;
+	.@old_md5$ = md5(.@old$);
+	if (strcmp(.@stored$,.@old$) != 0 && strcmp(.@stored$,.@old_md5$) != 0) {
+		dispbottom "目前密碼不正確，密碼沒有變更。";
+		goto OnPlayerPasswordDone;
+	}
+	.@save$ = (strcmp(.@stored$,.@old_md5$) == 0) ? md5(.@new$) : .@new$;
+	.@escaped$ = escape_sql(.@save$);
+	query_sql "UPDATE `login` SET `user_pass` = '" + .@escaped$ + "' WHERE `account_id` = " + .@account + " LIMIT 1";
+	.@verify$ = "";
+	query_sql "SELECT `user_pass` FROM `login` WHERE `account_id` = " + .@account + " LIMIT 1",.@verify$;
+	if (strcmp(.@verify$,.@save$) == 0)
+		dispbottom "登入密碼變更成功，下次登入請使用新密碼。";
+	else
+		dispbottom "密碼更新失敗，原密碼仍然有效。";
+
+OnPlayerPasswordDone:
+	.@old$ = "";
+	.@new$ = "";
+	.@confirm$ = "";
+	.@stored$ = "";
+	.@old_md5$ = "";
+	.@save$ = "";
+	.@escaped$ = "";
+	.@verify$ = "";
+	goto OnPlayerSettings;
+
+// ============================================================
+// GM main menu
+// ============================================================
+OnGMMenu:
+	.@menu$ = "^000080◆^000000 玩家功能:^8B0000◆^000000 自身功能:^006400◆^000000 快速傳送:^4B0082◆^000000 玩家管理工具:^8B4513◆^000000 倉庫功能:";
+	.@count = 5;
+	if (getgmlevel() >= 99) {
+		.@menu$ += "^4B0082★^000000 角色管理:^8B0000★^000000 管理員工具:";
+		.@count = 7;
+	}
+	.@menu$ += "^555555◇ 關閉選單^000000";
+	.@choice = select(.@menu$);
+
+	if (.@choice > .@count)
+		close;
+
+	switch(.@choice) {
+	case 1: goto OnPlayerMenu;
+	case 2: goto OnGMSelfTools;
+	case 3: goto OnGMWarpMenu;
+	case 4: goto OnGMPlayerTools;
+	case 5: goto OnGMStorageMenu;
+	case 6: goto OnGMCharacterSetup;
+	case 7: goto OnGMAdminTools;
+	}
+	goto OnGMMenu;
+
+// ============================================================
+// GM character management
+// ============================================================
+OnGMCharacterSetup:
+	if (getgmlevel() < 99)
+		close;
+
+	switch(select("^8B4513◆^000000 金錢與點數設定:^4B0082◆^000000 職業切換:^006400◆^000000 坐騎與夥伴:^000080◆^000000 學會全部技能:^8B0000★^000000 套用管理員素質:^4B0082★^000000 領取管理員特殊裝備:^555555◇ 返回管理員主選單^000000")) {
+	case 1:
+		goto OnGMCurrency;
+	case 2:
+		goto OnGMJobMenu;
+	case 3:
+		goto OnGMCompanionMenu;
+	case 4:
+		atcommand "@allskill";
+		goto OnGMCharacterSetup;
+	case 5:
+		statusup2 bStr, 130 - readparam(bStr);
+		statusup2 bAgi, 130 - readparam(bAgi);
+		statusup2 bVit, 130 - readparam(bVit);
+		statusup2 bInt, 130 - readparam(bInt);
+		statusup2 bDex, 130 - readparam(bDex);
+		statusup2 bLuk, 130 - readparam(bLuk);
+		statusup2 bPow, 100 - readparam(bPow);
+		statusup2 bSta, 100 - readparam(bSta);
+		statusup2 bWis, 100 - readparam(bWis);
+		statusup2 bSpl, 100 - readparam(bSpl);
+		statusup2 bCon, 100 - readparam(bCon);
+		statusup2 bCrt, 100 - readparam(bCrt);
+		goto OnGMCharacterSetup;
+	case 6:
+		getitem 50000, 1;
+		getitem 50001, 1;
+		getitem 50002, 1;
+		getitem 50003, 1;
+		getitem 50004, 1;
+		getitem 50005, 1;
+		getitem 50006, 1;
+		getitem 50007, 1;
+		getitem 50008, 1;
+		getitem 50009, 1;
+		getitem 50010, 1;
+		getitem 50011, 1;
+		getitem 50012, 1;
+		goto OnGMCharacterSetup;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMCurrency:
+	switch(select("^8B4513◆^000000 遊戲幣【" + Zeny + "】:^4B0082◆^000000 商城點數【" + #CASHPOINTS + "】:^000080◆^000000 卡普拉點數【" + #KAFRAPOINTS + "】:^555555◇ 返回角色管理^000000")) {
+	case 1:
+		input .@value, 0, 2147483647;
+		Zeny = .@value;
+		goto OnGMCurrency;
+	case 2:
+		input .@value, 0, 2147483647;
+		#CASHPOINTS = .@value;
+		goto OnGMCurrency;
+	case 3:
+		input .@value, 0, 2147483647;
+		#KAFRAPOINTS = .@value;
+		goto OnGMCurrency;
+	default:
+		goto OnGMCharacterSetup;
+	}
+
+// ============================================================
+// GM companions and mounts
+// ============================================================
+OnGMCompanionMenu:
+	.@menu$ = "";
+	.@count = 0;
+	deletearray .@type;
+
+	if (getskilllv("MC_PUSHCART") > 0) {
+		.@menu$ += "推車【" + (checkcart() ? "^00AA00使用中^000000" : "^FF5555未使用^000000") + "】:";
+		.@type[.@count] = 1;
+		.@count++;
+	}
+
+	if (
+		getskilllv("HT_FALCON") > 0 &&
+		Class != JOB_RANGER &&
+		Class != JOB_WINDHAWK
+	) {
+		.@menu$ += "獵鷹【" + (checkfalcon() ? "^00AA00使用中^000000" : "^FF5555未使用^000000") + "】:";
+		.@type[.@count] = 2;
+		.@count++;
+	}
+
+	if (
+		getskilllv("KN_RIDING") > 0 &&
+		Class != JOB_RUNE_KNIGHT &&
+		Class != JOB_DRAGON_KNIGHT
+	) {
+		.@menu$ += "騎乘獸【" + (checkriding() ? "^00AA00騎乘中^000000" : "^FF5555未騎乘^000000") + "】:";
+		.@type[.@count] = 3;
+		.@count++;
+	}
+
+	if (
+		Class == JOB_RUNE_KNIGHT ||
+		Class == JOB_DRAGON_KNIGHT
+	) {
+		.@menu$ += "龍【" + (checkdragon() ? "^00AA00騎乘中^000000" : "^FF5555未騎乘^000000") + "】:";
+		.@type[.@count] = 4;
+		.@count++;
+	}
+
+	if (
+		Class == JOB_MECHANIC ||
+		Class == JOB_MEISTER
+	) {
+		.@menu$ += "魔導機甲【" + (checkmadogear() ? "^00AA00搭乘中^000000" : "^FF5555未搭乘^000000") + "】:";
+		.@type[.@count] = 5;
+		.@count++;
+	}
+
+	if (
+		Class == JOB_RANGER ||
+		Class == JOB_WINDHAWK
+	) {
+		.@menu$ += "遊俠夥伴【" + (checkwug() ? "^00AA00狼^000000" : (checkfalcon() ? "^00AA00獵鷹^000000" : "^FF5555無^000000")) + "】:";
+		.@type[.@count] = 6;
+		.@count++;
+	}
+
+	.@menu$ += "返回 GM 角色設定";
+	.@sel = select(.@menu$);
+
+	if (.@sel > .@count) {
+		goto OnGMCharacterSetup;
+	}
+
+	switch(.@type[.@sel - 1]) {
+	case 1: goto OnGMCartToggle;
+	case 2: goto OnGMFalconToggle;
+	case 3: goto OnGMRidingToggle;
+	case 4: goto OnGMDragonToggle;
+	case 5: goto OnGMMadoToggle;
+	case 6: goto OnGMRangerPet;
+	}
+
+	goto OnGMCompanionMenu;
+
+OnGMCartToggle:
+	if (checkcart())
+		setcart 0;
+	else
+		setcart;
+	goto OnGMCompanionMenu;
+
+OnGMFalconToggle:
+	if (checkfalcon()) {
+		setfalcon 0;
+	}
+	else if (!checkwug()) {
+		setfalcon;
+	}
+	goto OnGMCompanionMenu;
+
+OnGMRidingToggle:
+	if (checkriding())
+		setriding 0;
+	else
+		setriding;
+	goto OnGMCompanionMenu;
+
+OnGMDragonToggle:
+	if (checkdragon()) {
+		setdragon 0;
+		goto OnGMCompanionMenu;
+	}
+
+	switch(select("^006400◆^000000 綠龍:^8B4513◆^000000 棕龍:^555555◆^000000 灰龍:^000080◆^000000 藍龍:^8B0000◆^000000 紅龍:^555555◇ 返回^000000")) {
+	case 1: setdragon 1; break;
+	case 2: setdragon 2; break;
+	case 3: setdragon 3; break;
+	case 4: setdragon 4; break;
+	case 5: setdragon 5; break;
+	}
+	goto OnGMCompanionMenu;
+
+OnGMMadoToggle:
+	if (checkmadogear())
+		setmadogear 0;
+	else
+		setmadogear;
+	goto OnGMCompanionMenu;
+
+OnGMRangerPet:
+	.@falcon$ = "獵鷹【" + (checkfalcon() ? "^00AA00使用中^000000" : "^FF5555未使用^000000") + "】";
+	.@wug$ = "狼笛【" + (countitem(6124) ? "^00AA00已持有^000000" : "^FF5555未持有^000000") + "】";
+
+	switch(select(.@falcon$ + ":" + .@wug$ + ":返回")) {
+	case 1:
+		if (checkfalcon())
+			setfalcon 0;
+		else if (!checkwug())
+			setfalcon;
+		goto OnGMRangerPet;
+
+	case 2:
+		if (!checkfalcon() && !checkwug() && !countitem(6124))
+			getitem 6124, 1;
+		goto OnGMRangerPet;
+
+	default:
+		goto OnGMCompanionMenu;
+	}
+OnGMJobMenu:
+
+	switch (select("^8B4513◆^000000 初心者與一轉職業:^006400◆^000000 二轉職業【可繼續進階】:^000080◆^000000 轉生二轉【可繼續進階】:^4B0082◆^000000 三轉職業【下一階四轉】:^8B0000★^000000 四轉職業【一般系最高階】:^8B4513◆^000000 擴充職業:^8B0000※^000000 管理員指令模式:^555555◇ 返回角色設定^000000")) {
+	case 1: goto OnGMJobFirst;
+	case 2: goto OnGMJobSecond;
+	case 3: goto OnGMJobTranscendent;
+	case 4: goto OnGMJobThird;
+	case 5: goto OnGMJobFourth;
+	case 6: goto OnGMJobExpanded;
+	case 7: goto OnGMJobCommand;
+	default:
+		goto OnGMCharacterSetup;
+	}
+
+OnGMJobCommand:
+	input .@job_id, 0, 10000;
+	.@upper_choice = select("不指定 Upper:普通職業（0）:轉生職業（1）:養子職業（2）:取消並返回");
+	if (.@upper_choice == 5) {
+		goto OnGMJobMenu;
+	}
+
+	.@command$ = "@jobchange " + .@job_id;
+	if (.@upper_choice > 1)
+		.@command$ += " " + (.@upper_choice - 2);
+
+	if (select("執行 GM 指令:取消並返回") == 2) {
+		goto OnGMJobMenu;
+	}
+	getmapxy(.@return_map$, .@return_x, .@return_y, BL_PC);
+	close2;
+	atcommand .@command$;
+	atcommand "@allskill";
+	sleep2 300;
+	warp .@return_map$, .@return_x, .@return_y;
+	end;
+
+OnGMJobFirst:
+	switch (select("初心者:劍士:魔法師:弓箭手:服事:商人:盜賊:返回職業分類")) {
+	case 1: callsub S_ChangeJob, JOB_NOVICE; end;
+	case 2: callsub S_ChangeJob, JOB_SWORDMAN; end;
+	case 3: callsub S_ChangeJob, JOB_MAGE; end;
+	case 4: callsub S_ChangeJob, JOB_ARCHER; end;
+	case 5: callsub S_ChangeJob, JOB_ACOLYTE; end;
+	case 6: callsub S_ChangeJob, JOB_MERCHANT; end;
+	case 7: callsub S_ChangeJob, JOB_THIEF; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobSecond:
+
+	.@performer$ = (Sex == SEX_MALE) ? "吟遊詩人" : "舞孃";
+	switch (select(
+	"騎士（劍士系）:"
+	+ "十字軍（劍士系）:"
+	+ "巫師（魔法師系）:"
+	+ "賢者（魔法師系）:"
+	+ "獵人（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "祭司（服事系）:"
+	+ "武僧（服事系）:"
+	+ "鐵匠（商人系）:"
+	+ "鍊金術師（商人系）:"
+	+ "刺客（盜賊系）:"
+	+ "流氓（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_CRUSADER; end;
+	case 3: callsub S_ChangeJob, JOB_WIZARD; end;
+	case 4: callsub S_ChangeJob, JOB_SAGE; end;
+	case 5: callsub S_ChangeJob, JOB_HUNTER; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_BARD : JOB_DANCER; end;
+	case 7: callsub S_ChangeJob, JOB_PRIEST; end;
+	case 8: callsub S_ChangeJob, JOB_MONK; end;
+	case 9: callsub S_ChangeJob, JOB_BLACKSMITH; end;
+	case 10: callsub S_ChangeJob, JOB_ALCHEMIST; end;
+	case 11: callsub S_ChangeJob, JOB_ASSASSIN; end;
+	case 12: callsub S_ChangeJob, JOB_ROGUE; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobTranscendent:
+
+	.@performer$ = (Sex == SEX_MALE) ? "搞笑藝人" : "冷豔舞姬";
+	switch (select(
+	"騎士領主（劍士系）:"
+	+ "聖殿十字軍（劍士系）:"
+	+ "超魔導師（魔法師系）:"
+	+ "智者（魔法師系）:"
+	+ "神射手（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "神官（服事系）:"
+	+ "武術宗師（服事系）:"
+	+ "神工匠（商人系）:"
+	+ "創造者（商人系）:"
+	+ "十字刺客（盜賊系）:"
+	+ "神行太保（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_LORD_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_PALADIN; end;
+	case 3: callsub S_ChangeJob, JOB_HIGH_WIZARD; end;
+	case 4: callsub S_ChangeJob, JOB_PROFESSOR; end;
+	case 5: callsub S_ChangeJob, JOB_SNIPER; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_CLOWN : JOB_GYPSY; end;
+	case 7: callsub S_ChangeJob, JOB_HIGH_PRIEST; end;
+	case 8: callsub S_ChangeJob, JOB_CHAMPION; end;
+	case 9: callsub S_ChangeJob, JOB_WHITESMITH; end;
+	case 10: callsub S_ChangeJob, JOB_CREATOR; end;
+	case 11: callsub S_ChangeJob, JOB_ASSASSIN_CROSS; end;
+	case 12: callsub S_ChangeJob, JOB_STALKER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobThird:
+
+	.@performer$ = (Sex == SEX_MALE) ? "宮廷樂師" : "浪姬舞者";
+	switch (select(
+	"盧恩騎士（劍士系）:"
+	+ "皇家禁衛隊（劍士系）:"
+	+ "咒術士（魔法師系）:"
+	+ "妖術師（魔法師系）:"
+	+ "遊俠（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "大主教（服事系）:"
+	+ "修羅（服事系）:"
+	+ "機匠（商人系）:"
+	+ "基因學者（商人系）:"
+	+ "十字斬首者（盜賊系）:"
+	+ "魅影追蹤者（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_RUNE_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_ROYAL_GUARD; end;
+	case 3: callsub S_ChangeJob, JOB_WARLOCK; end;
+	case 4: callsub S_ChangeJob, JOB_SORCERER; end;
+	case 5: callsub S_ChangeJob, JOB_RANGER; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_MINSTREL : JOB_WANDERER; end;
+	case 7: callsub S_ChangeJob, JOB_ARCH_BISHOP; end;
+	case 8: callsub S_ChangeJob, JOB_SURA; end;
+	case 9: callsub S_ChangeJob, JOB_MECHANIC; end;
+	case 10: callsub S_ChangeJob, JOB_GENETIC; end;
+	case 11: callsub S_ChangeJob, JOB_GUILLOTINE_CROSS; end;
+	case 12: callsub S_ChangeJob, JOB_SHADOW_CHASER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobFourth:
+
+	.@performer$ = (Sex == SEX_MALE) ? "天籟頌者" : "樂之舞靈";
+switch (select(
+	"天帝劍士（劍士系）:"
+	+ "帝國聖衛軍（劍士系）:"
+	+ "禁咒魔導士（魔法師系）:"
+	+ "元素支配者（魔法師系）:"
+	+ "風鷹狩獵者（弓箭手系）:"
+	+ .@performer$ + "（弓箭手系）:"
+	+ "樞機主教（服事系）:"
+	+ "聖裁者（服事系）:"
+	+ "生命締造者（商人系）:"
+	+ "生物學者（商人系）:"
+	+ "暗影十字（盜賊系）:"
+	+ "深淵追跡者（盜賊系）:"
+	+ "返回職業分類"
+)) {
+	case 1: callsub S_ChangeJob, JOB_DRAGON_KNIGHT; end;
+	case 2: callsub S_ChangeJob, JOB_IMPERIAL_GUARD; end;
+	case 3: callsub S_ChangeJob, JOB_ARCH_MAGE; end;
+	case 4: callsub S_ChangeJob, JOB_ELEMENTAL_MASTER; end;
+	case 5: callsub S_ChangeJob, JOB_WINDHAWK; end;
+	case 6: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_TROUBADOUR : JOB_TROUVERE; end;
+	case 7: callsub S_ChangeJob, JOB_CARDINAL; end;
+	case 8: callsub S_ChangeJob, JOB_INQUISITOR; end;
+	case 9: callsub S_ChangeJob, JOB_MEISTER; end;
+	case 10: callsub S_ChangeJob, JOB_BIOLO; end;
+	case 11: callsub S_ChangeJob, JOB_SHADOW_CROSS; end;
+	case 12: callsub S_ChangeJob, JOB_ABYSS_CHASER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+OnGMJobExpanded:
+	.@ninja$ = (Sex == SEX_MALE) ? "日影忍者" : "月影忍者";
+	.@fourth_ninja$ = (Sex == SEX_MALE) ? "蜃氣樓" : "不知火";
+	switch (select("超級初心者:神槍手:反叛者:忍者:" + .@ninja$ + ":跆拳少年／少女:拳聖:悟靈士:星帝:獵靈士:召喚師:頂級初心者:夜巡者:" + .@fourth_ninja$ + ":天帝:靈導士:魂靈師:返回職業分類")) {
+	case 1: callsub S_ChangeJob, JOB_SUPER_NOVICE; end;
+	case 2: callsub S_ChangeJob, JOB_GUNSLINGER; end;
+	case 3: callsub S_ChangeJob, JOB_REBELLION; end;
+	case 4: callsub S_ChangeJob, JOB_NINJA; end;
+	case 5: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_KAGEROU : JOB_OBORO; end;
+	case 6: callsub S_ChangeJob, JOB_TAEKWON; end;
+	case 7: callsub S_ChangeJob, JOB_STAR_GLADIATOR; end;
+	case 8: callsub S_ChangeJob, JOB_SOUL_LINKER; end;
+	case 9: callsub S_ChangeJob, JOB_STAR_EMPEROR; end;
+	case 10: callsub S_ChangeJob, JOB_SOUL_REAPER; end;
+	case 11: callsub S_ChangeJob, JOB_SUMMONER; end;
+	case 12: callsub S_ChangeJob, JOB_HYPER_NOVICE; end;
+	case 13: callsub S_ChangeJob, JOB_NIGHT_WATCH; end;
+	case 14: callsub S_ChangeJob, (Sex == SEX_MALE) ? JOB_SHINKIRO : JOB_SHIRANUI; end;
+	case 15: callsub S_ChangeJob, JOB_SKY_EMPEROR; end;
+	case 16: callsub S_ChangeJob, JOB_SOUL_ASCETIC; end;
+	case 17: callsub S_ChangeJob, JOB_SPIRIT_HANDLER; end;
+	default: clear; goto OnGMJobMenu;
+	}
+
+S_ChangeJob:
+	.@job_id = getarg(0);
+
+if (select("確定切換:取消") == 2) {
+		goto OnGMJobMenu;
+	}
+
+	atcommand "@jobchange " + .@job_id;
+	atcommand "@allskill";
+
+	callsub S_JobExtraOption, .@job_id;
+
+	end;
+
+S_JobExtraOption:
+	.@job_id = getarg(0);
+
+// ========================================================
+	// Mechanic
+	// 推車 / 魔導機甲
+	// ========================================================
+	if (.@job_id == JOB_MECHANIC) {
+
+		.@choice = select("使用推車:搭乘魔導機甲:都不要");
+
+		switch(.@choice) {
+		case 1:
+			if (!checkcart())
+				setcart;
+			break;
+
+		case 2:
+			if (
+				getskilllv("NC_MADOLICENCE") > 0 &&
+				!checkmadogear()
+			)
+				setmadogear;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Meister
+	// 推車 / 魔導機甲
+	// ========================================================
+	if (.@job_id == JOB_MEISTER) {
+
+		.@choice = select("使用推車:搭乘魔導機甲:都不要");
+
+		switch(.@choice) {
+		case 1:
+			if (!checkcart())
+				setcart;
+			break;
+
+		case 2:
+			if (
+				getskilllv("NC_MADOLICENCE") > 0 &&
+				!checkmadogear()
+			)
+				setmadogear;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// 其他商人系
+	// 推車
+	// ========================================================
+	if (getskilllv("MC_PUSHCART") > 0) {
+
+		if (select("使用推車:不要使用") == 1) {
+			if (!checkcart())
+				setcart;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Ranger
+	// Falcon / Warg
+	// ========================================================
+	if (.@job_id == JOB_RANGER) {
+
+		.@choice = select("攜帶獵鷹:取得狼笛:都不要");
+
+		switch(.@choice) {
+
+		case 1:
+			if (
+				getskilllv("HT_FALCON") > 0 &&
+				!checkfalcon() &&
+				!checkwug()
+			)
+				setfalcon;
+			break;
+
+		case 2:
+			if (
+				!checkfalcon() &&
+				!checkwug() &&
+				!countitem(6124)
+			)
+				getitem 6124, 1;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Windhawk
+	// 保留 Ranger 系統可用夥伴
+	// ========================================================
+	if (.@job_id == JOB_WINDHAWK) {
+
+		.@choice = select("攜帶獵鷹:取得狼笛:都不要");
+
+		switch(.@choice) {
+
+		case 1:
+			if (
+				getskilllv("HT_FALCON") > 0 &&
+				!checkfalcon() &&
+				!checkwug()
+			)
+				setfalcon;
+			break;
+
+		case 2:
+			if (
+				!checkfalcon() &&
+				!checkwug() &&
+				!countitem(6124)
+			)
+				getitem 6124, 1;
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Hunter / Sniper
+	// Falcon
+	// ========================================================
+	if (
+		.@job_id == JOB_HUNTER ||
+		.@job_id == JOB_SNIPER
+	) {
+
+		if (select("攜帶獵鷹:不要攜帶") == 1) {
+			if (
+				getskilllv("HT_FALCON") > 0 &&
+				!checkfalcon() &&
+				!checkwug()
+			)
+				setfalcon;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Rune Knight
+	// Dragon
+	// ========================================================
+	if (.@job_id == JOB_RUNE_KNIGHT) {
+
+		.@dragon = select("綠龍:棕龍:灰龍:藍龍:紅龍:不騎乘");
+
+		switch(.@dragon) {
+		case 1:
+			setdragon(1);
+			break;
+
+		case 2:
+			setdragon(2);
+			break;
+
+		case 3:
+			setdragon(3);
+			break;
+
+		case 4:
+			setdragon(4);
+			break;
+
+		case 5:
+			setdragon(5);
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Dragon Knight
+	// Dragon
+	// ========================================================
+	if (.@job_id == JOB_DRAGON_KNIGHT) {
+
+		.@dragon = select("綠龍:棕龍:灰龍:藍龍:紅龍:不騎乘");
+
+		switch(.@dragon) {
+		case 1:
+			setdragon(1);
+			break;
+
+		case 2:
+			setdragon(2);
+			break;
+
+		case 3:
+			setdragon(3);
+			break;
+
+		case 4:
+			setdragon(4);
+			break;
+
+		case 5:
+			setdragon(5);
+			break;
+		}
+
+		close;
+	}
+
+// ========================================================
+	// Knight / Crusader / Lord Knight / Paladin
+	// Riding
+	// ========================================================
+	if (
+		.@job_id == JOB_KNIGHT ||
+		.@job_id == JOB_CRUSADER ||
+		.@job_id == JOB_LORD_KNIGHT ||
+		.@job_id == JOB_PALADIN
+	) {
+
+		if (select("騎乘:徒步") == 1) {
+			if (!checkriding())
+				setriding;
+		}
+
+		close;
+	}
+
+close;
+
+OnGMSelfTools:
+	switch (select("^8B0000◆^000000 完全恢復生命與魔力:^006400◆^000000 解除所有狀態:^000080◆^000000 儲存目前位置:^8B4513◆^000000 返回儲存地點:^555555◇ 返回管理員主選單^000000")) {
+	case 1:
+		percentheal 100, 100;
+		goto OnGMSelfTools;
+	case 2:
+		sc_end SC_ALL;
+		percentheal 100, 100;
+		goto OnGMSelfTools;
+	case 3:
+		close2;
+		atcommand "@save";
+		end;
+	case 4:
+		warp "SavePoint", 0, 0;
+		end;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMWarpMenu:
+	switch (select("^8B4513◆^000000 盧恩米德加茲主城:^006400◆^000000 海外與特色城市:^000080◆^000000 異世界與新區域:^4B0082◆^000000 常用地下城:^8B0000★^000000 副本與特殊入口:^555555※^000000 自訂地圖座標:^555555◇ 返回管理員主選單^000000")) {
+	case 1: goto OnGMWarpMainCities;
+	case 2: goto OnGMWarpOverseas;
+	case 3: goto OnGMWarpNewWorld;
+	case 4: goto OnGMWarpDungeons;
+	case 5: goto OnGMWarpInstances;
+	case 6: goto OnGMWarpCustom;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMWarpMainCities:
+	switch (select("普隆德拉:伊斯魯得島:吉芬:斐揚:夢羅克:艾爾貝塔:艾爾帕蘭:朱諾:里希塔樂鎮:艾音布羅克:艾音貝赫:毀葛:拉赫:菲音斯:返回傳送分類")) {
+	case 1: warp "prontera", 155, 183; end;
+	case 2: warp "izlude", 128, 146; end;
+	case 3: warp "geffen", 119, 59; end;
+	case 4: warp "payon", 179, 100; end;
+	case 5: warp "morocc", 156, 93; end;
+	case 6: warp "alberta", 28, 234; end;
+	case 7: warp "aldebaran", 140, 131; end;
+	case 8: warp "yuno", 157, 51; end;
+	case 9: warp "lighthalzen", 158, 92; end;
+	case 10: warp "einbroch", 64, 200; end;
+	case 11: warp "einbech", 63, 35; end;
+	case 12: warp "hugel", 96, 145; end;
+	case 13: warp "rachel", 130, 110; end;
+	case 14: warp "veins", 216, 123; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpOverseas:
+	switch (select("天津町:崑崙:洛陽:哎喲泰雅:克魔島:汶巴拉:尼芙菲姆:聖誕村:爪哇咿:莫斯科比亞:巴西:德瓦他:馬來港:馬蘭島:羅札納:返回傳送分類")) {
+	case 1: warp "amatsu", 198, 84; end;
+	case 2: warp "gonryun", 160, 120; end;
+	case 3: warp "louyang", 217, 100; end;
+	case 4: warp "ayothaya", 208, 166; end;
+	case 5: warp "comodo", 209, 143; end;
+	case 6: warp "umbala", 97, 153; end;
+	case 7: warp "niflheim", 202, 174; end;
+	case 8: warp "xmas", 147, 134; end;
+	case 9: warp "jawaii", 251, 132; end;
+	case 10: warp "moscovia", 223, 184; end;
+	case 11: warp "brasilis", 196, 217; end;
+	case 12: warp "dewata", 200, 180; end;
+	case 13: warp "malaya", 231, 200; end;
+	case 14: warp "malangdo", 140, 114; end;
+	case 15: warp "lasagna", 193, 182; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpNewWorld:
+	switch (select("異世界聯合營地:魔怒克:史波浪壯麗:艾爾迪卡斯特:穆拉村:艾克拉珠:岩石山脊:特殊警戒區柯爾:巴爾蒙特宅邸:貝魯茲考古地:灰狼村:冰之城:雷神之錘營地:無名島白天:無名島夜晚:返回傳送分類")) {
+	case 1: warp "mid_camp", 210, 288; end;
+	case 2: warp "manuk", 282, 138; end;
+	case 3: warp "splendide", 201, 147; end;
+	case 4: warp "dicastes01", 198, 187; end;
+	case 5: warp "mora", 55, 146; end;
+	case 6: warp "ecl_in01", 48, 53; end;
+	case 7: warp "harboro1", 298, 206; end;
+	case 8: warp "sp_cor", 160, 166; end;
+	case 9: warp "ba_maison", 72, 146; end;
+	case 10: warp "verus04", 123, 250; end;
+	case 11: warp "wolfvill", 144, 144; end;
+	case 12: warp "icecastle", 185, 212; end;
+	case 13: warp "thor_camp", 246, 68; end;
+	case 14: warp "nameless_i", 256, 215; end;
+	case 15: warp "nameless_n", 256, 215; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpDungeons:
+	switch (select("斐揚地下洞穴:吉芬地下城:獸人地下洞窟:螞蟻地獄:金字塔:史芬克斯:玩具工廠:沉沒之船:烏龜島地下城:古城入口:鐘樓一樓:礦坑一樓:海底洞窟一樓:生體研究所一樓:冰洞穴一樓:火山洞窟一樓:深淵湖一樓:朱諾斯遺跡入口:拉赫神殿一樓:奧丁神殿一樓:死塔一樓:返回傳送分類")) {
+	case 1: warp "pay_dun01", 21, 183; end;
+	case 2: warp "gef_dun01", 115, 236; end;
+	case 3: warp "orcsdun01", 32, 170; end;
+	case 4: warp "anthell01", 35, 262; end;
+	case 5: warp "moc_pryd01", 192, 9; end;
+	case 6: warp "in_sphinx1", 288, 9; end;
+	case 7: warp "xmas_dun01", 205, 15; end;
+	case 8: warp "treasure01", 69, 24; end;
+	case 9: warp "tur_dun01", 154, 49; end;
+	case 10: warp "glast_01", 370, 304; end;
+	case 11: warp "c_tower1", 199, 159; end;
+	case 12: warp "mjo_dun01", 52, 17; end;
+	case 13: warp "iz_dun01", 168, 168; end;
+	case 14: warp "lhz_dun01", 150, 288; end;
+	case 15: warp "ice_dun01", 157, 14; end;
+	case 16: warp "mag_dun01", 126, 68; end;
+	case 17: warp "abyss_01", 261, 272; end;
+	case 18: warp "jupe_cave", 140, 51; end;
+	case 19: warp "ra_san01", 140, 11; end;
+	case 20: warp "odin_tem01", 298, 167; end;
+	case 21: warp "tha_t01", 150, 39; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpInstances:
+	switch (select("無限塔入口:夢魘吉芬入口:幽靈皇宮入口:霧林迷宮入口:恐怖玩具工廠入口:古城副本入口:莎拉與芬里爾入口:莎拉的記憶入口:封印神殿入口:尼德霍格巢穴入口:章魚洞穴入口:魔神之塔入口:返回傳送分類")) {
+	case 1: warp "e_tower", 72, 112; end;
+	case 2: warp "dali", 94, 141; end;
+	case 3: warp "dali02", 46, 128; end;
+	case 4: warp "bif_fild01", 161, 334; end;
+	case 5: warp "xmas", 234, 298; end;
+	case 6: warp "glast_01", 204, 268; end;
+	case 7: warp "dali02", 92, 141; end;
+	case 8: warp "dali", 133, 108; end;
+	case 9: warp "monk_test", 306, 143; end;
+	case 10: warp "nyd_dun02", 95, 193; end;
+	case 11: warp "mal_dun01", 152, 230; end;
+	case 12: warp "dali02", 137, 115; end;
+	default: clear; goto OnGMWarpMenu;
+	}
+
+OnGMWarpCustom:
+	input .@map$;
+	input .@x, 0, 1000;
+	input .@y, 0, 1000;
+	if (select("確定傳送:取消") == 2) {
+		goto OnGMWarpMenu;
+	}
+	warp .@map$, .@x, .@y;
+	end;
+
+OnGMPlayerTools:
+	switch (select("^000080◆^000000 查看線上玩家:^8B0000◆^000000 移動至指定玩家:^555555◇ 返回管理員主選單^000000")) {
+	case 1:
+		close2;
+		atcommand "@who";
+		end;
+	case 2:
+		input .@player$;
+		close2;
+		atcommand "@jumpto " + .@player$;
+		end;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMStorageMenu:
+	switch (select("^8B4513◆^000000 開啟個人倉庫:^4B0082◆^000000 開啟公會倉庫:^555555◇ 返回管理員主選單^000000")) {
+	case 1:
+		openstorage;
+		end;
+	case 2:
+		guildopenstorage;
+		end;
+	default:
+		goto OnGMMenu;
+	}
+
+OnGMAdminTools:
+	if (getgmlevel() < 99)
+		close;
+	switch(select("^8B0000★^000000 玩家與公告管理:^006400★^000000 資料庫與伺服器:^4B0082★^000000 商店、工坊與活動:^555555◇ 返回管理員主選單^000000")) {
+	case 1: goto OnGMAdminPlayer;
+	case 2: goto OnGMAdminDatabase;
+	case 3: goto OnGMAdminServices;
+	default: goto OnGMMenu;
+	}
+
+OnGMAdminPlayer:
+	switch(select("^8B0000★^000000 全服廣播:^000080◆^000000 召回指定玩家:^8B0000◆^000000 踢除指定玩家:^555555◇ 返回管理員工具^000000")) {
+	case 1:
+		input .@message$;
+		if (select("^8B0000◆^000000 確定送出:^555555◇ 取消^000000") == 2) goto OnGMAdminPlayer;
+		close2;
+		atcommand "@broadcast " + .@message$;
+		end;
+	case 2:
+		input .@player$;
+		close2;
+		atcommand "@recall " + .@player$;
+		end;
+	case 3:
+		input .@player$;
+		if (select("^8B0000◆^000000 確定踢除:^555555◇ 取消^000000") == 2) goto OnGMAdminPlayer;
+		close2;
+		atcommand "@kick " + .@player$;
+		end;
+	default:
+		goto OnGMAdminTools;
+	}
+
+OnGMAdminDatabase:
+	switch(select("^8B0000★^000000 伺服器倍率管理:^4B0082◆^000000 建立物品:^006400※^000000 重載物品資料庫:^006400※^000000 重載魔物資料庫:^006400※^000000 重載戰鬥設定:^555555◇ 返回管理員工具^000000")) {
+	case 1:
+		goto OnGMRateManage;
+	case 2:
+		input .@item_id,1,1000000;
+		input .@amount,1,30000;
+		if (select("^4B0082◆^000000 確定建立:^555555◇ 取消^000000") == 2) goto OnGMAdminDatabase;
+		getitem .@item_id,.@amount;
+		goto OnGMAdminDatabase;
+	case 3:
+		if (select("^006400◆^000000 確定重載:^555555◇ 取消^000000") == 2) goto OnGMAdminDatabase;
+		close2;
+		atcommand "@reloaditemdb";
+		end;
+	case 4:
+		if (select("^006400◆^000000 確定重載:^555555◇ 取消^000000") == 2) goto OnGMAdminDatabase;
+		close2;
+		atcommand "@reloadmobdb";
+		end;
+	case 5:
+		if (select("^006400◆^000000 確定重載:^555555◇ 取消^000000") == 2) goto OnGMAdminDatabase;
+		close2;
+		atcommand "@reloadbattleconf";
+		callsub S_ApplyServerRates;
+		end;
+	default:
+		goto OnGMAdminTools;
+	}
+
+OnGMAdminServices:
+	switch(select("^8B4513◆^000000 管理藥水商店:^4B0082◆^000000 工坊功能開關:^8B0000★^000000 活動補給管理:^006400◆^000000 玩家傳送設定:^000080◆^000000 玩家便捷服務:^8B4513◆^000000 玩家支援設定:^4B0082◆^000000 玩家角色服務:^555555◇ 返回管理員工具^000000")) {
+	case 1: goto OnGMPotionManage;
+	case 2: goto OnGMWorkshopToggle;
+	case 3: goto OnGMSupplyManage;
+	case 4: goto OnGMTravelManage;
+	case 5: goto OnGMServiceManage;
+	case 6: goto OnGMSupportManage;
+	case 7: goto OnGMRoleManage;
+	default: goto OnGMAdminTools;
+	}
+// ============================================================
+// ============================================================
+// In-game potion shop management
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+// ============================================================
+// Player workshop visibility switches (GM only)
+// ============================================================
+OnGMWorkshopToggle:
+	if (getgmlevel() < 99)
+		close;
+
+	.@menu$ = "^8B4513◆^000000 裝備精煉【" + ($PWRefine ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^8B0000◆^000000 階級強化【" + ($PWGrade ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^000080◆^000000 物品合併【" + ($PWMerge ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^4B0082★^000000 台版風格裝備附魔【" + ($PWEnchant ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^000080◆^000000 裝備打洞【" + ($PWSocket ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^8B0000◆^000000 卡片拆卸【" + ($PWCardRemove ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^006400◆^000000 購買移卡券【" + ($PWCardMove ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^8B4513◆^000000 階級材料交換【" + ($PWGradeExchange ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^006400◆^000000 修理全部裝備【" + ($PWRepair ? "^006400開啟^000000" : "^8B0000關閉^000000") + "】:";
+	.@menu$ += "^555555◇ 返回管理員工具^000000";
+
+	switch(select(.@menu$)) {
+	case 1: $PWRefine = !$PWRefine; goto OnGMWorkshopToggle;
+	case 2: $PWGrade = !$PWGrade; goto OnGMWorkshopToggle;
+	case 3: $PWMerge = !$PWMerge; goto OnGMWorkshopToggle;
+	case 4: $PWEnchant = !$PWEnchant; goto OnGMWorkshopToggle;
+	case 5: $PWSocket = !$PWSocket; goto OnGMWorkshopToggle;
+	case 6: $PWCardRemove = !$PWCardRemove; goto OnGMWorkshopToggle;
+	case 7: $PWCardMove = !$PWCardMove; goto OnGMWorkshopToggle;
+	case 8: $PWGradeExchange = !$PWGradeExchange; goto OnGMWorkshopToggle;
+	case 9: $PWRepair = !$PWRepair; goto OnGMWorkshopToggle;
+	default: goto OnGMAdminTools;
+	}
+// ============================================================
+// Special event supply management (GM only)
+// ============================================================
+OnGMSupplyManage:
+	if (getgmlevel() < 99)
+		close;
+	.@status$ = $PMSupplyActive ? "^006400開放中^000000" : "^8B0000已關閉^000000";
+	switch(select("^8B4513※^000000 活動狀態【" + .@status$ + "】:^006400★^000000 開始新一期活動:^8B0000◆^000000 結束目前活動:^4B0082◆^000000 設定活動名稱:^8B4513◆^000000 設定領取費用【" + $PMSupplyFee + "】:^000080◆^000000 增加或修改補給物品:^8B0000◆^000000 刪除補給物品:^8B0000※^000000 清空補給清單:^006400◆^000000 查看目前設定:^555555◇ 返回管理員工具^000000")) {
+	case 1:
+		goto OnGMSupplyManage;
+	case 2:
+		if ($PMSupplyCount < 1 || $PMSupplyFee < 1) {
+			dispbottom "請先設定至少一項補給物品及非零費用。";
+			goto OnGMSupplyManage;
+		}
+		if (select("確定開始新一期【玩家可重新領取】:取消") != 1)
+			goto OnGMSupplyManage;
+		$PMSupplyRound++;
+		$PMSupplyActive = 1;
+		dispbottom "活動補給第 " + $PMSupplyRound + " 期已開放。";
+		goto OnGMSupplyManage;
+	case 3:
+		$PMSupplyActive = 0;
+		dispbottom "活動補給已關閉，玩家選單將不再顯示。";
+		goto OnGMSupplyManage;
+	case 4:
+		input .@event_name$;
+		if (.@event_name$ != "") $PMSupplyName$ = .@event_name$;
+		goto OnGMSupplyManage;
+	case 5:
+		input .@fee,1,2000000000;
+		$PMSupplyFee = .@fee;
+		goto OnGMSupplyManage;
+	case 6:
+		goto OnGMSupplyAdd;
+	case 7:
+		goto OnGMSupplyDelete;
+	case 8:
+		if (select("確定清空所有補給物品:取消") != 1)
+			goto OnGMSupplyManage;
+		deletearray $PMSupplyItem;
+		deletearray $PMSupplyAmount;
+		$PMSupplyCount = 0;
+		goto OnGMSupplyManage;
+	case 9:
+		dispbottom "活動名稱：" + $PMSupplyName$;
+		dispbottom "活動期數：" + $PMSupplyRound + "｜領取費用：" + $PMSupplyFee + " 遊戲幣";
+		for (.@i = 0; .@i < $PMSupplyCount; .@i++) {
+			.@name$ = "";
+			query_sql "SELECT `display_name` FROM `client_item_names` WHERE `item_id` = " + $PMSupplyItem[.@i], .@name$;
+			if (.@name$ == "") .@name$ = getitemname($PMSupplyItem[.@i]);
+			dispbottom "◆ " + .@name$ + "【" + $PMSupplyItem[.@i] + "】× " + $PMSupplyAmount[.@i];
+		}
+		goto OnGMSupplyManage;
+	default:
+		goto OnGMAdminTools;
+	}
+
+OnGMSupplyAdd:
+	if (getgmlevel() < 99)
+		close;
+	input .@item_id,1,1000000;
+	input .@amount,1,30000;
+	if (getitemname(.@item_id) == "null") {
+		dispbottom "物品編號不存在。";
+		goto OnGMSupplyManage;
+	}
+	.@found = -1;
+	for (.@i = 0; .@i < $PMSupplyCount; .@i++) {
+		if ($PMSupplyItem[.@i] == .@item_id) { .@found = .@i; break; }
+	}
+	if (.@found < 0) {
+		$PMSupplyItem[$PMSupplyCount] = .@item_id;
+		$PMSupplyAmount[$PMSupplyCount] = .@amount;
+		$PMSupplyCount++;
+	}
+	else
+		$PMSupplyAmount[.@found] = .@amount;
+	dispbottom "補給物品已儲存。";
+	goto OnGMSupplyManage;
+
+OnGMSupplyDelete:
+	if (getgmlevel() < 99)
+		close;
+	if ($PMSupplyCount < 1) {
+		dispbottom "補給清單目前沒有物品。";
+		goto OnGMSupplyManage;
+	}
+	input .@item_id,1,1000000;
+	.@found = -1;
+	for (.@i = 0; .@i < $PMSupplyCount; .@i++) {
+		if ($PMSupplyItem[.@i] == .@item_id) { .@found = .@i; break; }
+	}
+	if (.@found < 0) {
+		dispbottom "補給清單中找不到這個物品編號。";
+		goto OnGMSupplyManage;
+	}
+	for (.@i = .@found; .@i < $PMSupplyCount - 1; .@i++) {
+		$PMSupplyItem[.@i] = $PMSupplyItem[.@i + 1];
+		$PMSupplyAmount[.@i] = $PMSupplyAmount[.@i + 1];
+	}
+	deletearray $PMSupplyItem[$PMSupplyCount - 1],1;
+	deletearray $PMSupplyAmount[$PMSupplyCount - 1],1;
+	$PMSupplyCount--;
+	dispbottom "補給物品已刪除。";
+	goto OnGMSupplyManage;
+// ============================================================
+// Paid player travel management (GM only)
+// ============================================================
+OnGMTravelManage:
+	if (getgmlevel() < 99)
+		close;
+	.@status$ = $PMTravelActive ? "^006400開啟^000000" : "^8B0000關閉^000000";
+	switch(select("^006400◆^000000 玩家傳送功能【" + .@status$ + "】:^8B4513◆^000000 城鎮費用【" + $PMTravelTownFee + "】:^006400◆^000000 練功區費用【" + $PMTravelFieldFee + "】:^4B0082◆^000000 地下城費用【" + $PMTravelDungeonFee + "】:^555555◇ 返回服務管理^000000")) {
+	case 1:
+		$PMTravelActive = !$PMTravelActive;
+		goto OnGMTravelManage;
+	case 2:
+		input .@fee,1,2000000000;
+		$PMTravelTownFee = .@fee;
+		goto OnGMTravelManage;
+	case 3:
+		input .@fee,1,2000000000;
+		$PMTravelFieldFee = .@fee;
+		goto OnGMTravelManage;
+	case 4:
+		input .@fee,1,2000000000;
+		$PMTravelDungeonFee = .@fee;
+		goto OnGMTravelManage;
+	default:
+		goto OnGMAdminServices;
+	}
+// ============================================================
+// Player convenience service management
+// ============================================================
+OnGMServiceManage:
+	if (getgmlevel() < 99)
+		close;
+	.@status$ = $PMServiceActive ? "^006400開啟^000000" : "^8B0000關閉^000000";
+	switch(select("^8B4513◆^000000 便捷服務【" + .@status$ + "】:^000080◆^000000 鑑定單價【" + $PMIdentifyFee + "】:^4B0082◆^000000 重整費用【" + $PMPurifyFee + "】:^555555◇ 返回服務管理^000000")) {
+	case 1:
+		$PMServiceActive = !$PMServiceActive;
+		dispbottom "玩家便捷服務已" + ($PMServiceActive ? "開啟。" : "關閉。" );
+		goto OnGMServiceManage;
+	case 2:
+		input .@fee,1,100000000;
+		$PMIdentifyFee = .@fee;
+		dispbottom "每件鑑定費用已更新。";
+		goto OnGMServiceManage;
+	case 3:
+		input .@fee,1,100000000;
+		$PMPurifyFee = .@fee;
+		dispbottom "狀態重整費用已更新。";
+		goto OnGMServiceManage;
+	default:
+		goto OnGMAdminServices;
+	}
+
+OnGMSupportManage:
+	if (getgmlevel() < 99)
+		close;
+	switch(select("^8B0000◆^000000 恢復費用【" + $PMHealFee + "】:^000080◆^000000 返回費用【" + $PMReturnFee + "】:^8B4513◆^000000 倉庫費用【" + $PMStorageFee + "】:^006400◆^000000 儲點費用【" + $PMSaveFee + "】:^4B0082◆^000000 公會倉庫【" + $PMGuildStorageFee + "】:^555555◇ 返回服務管理^000000")) {
+	case 1: input .@fee,1,100000000; $PMHealFee = .@fee; goto OnGMSupportManage;
+	case 2: input .@fee,1,100000000; $PMReturnFee = .@fee; goto OnGMSupportManage;
+	case 3: input .@fee,1,100000000; $PMStorageFee = .@fee; goto OnGMSupportManage;
+	case 4: input .@fee,1,100000000; $PMSaveFee = .@fee; goto OnGMSupportManage;
+	case 5: input .@fee,1,100000000; $PMGuildStorageFee = .@fee; goto OnGMSupportManage;
+	default: goto OnGMAdminServices;
+	}
+
+OnGMRoleManage:
+	if (getgmlevel() < 99)
+		close;
+	.@status$ = $PMRoleActive ? "^006400開啟^000000" : "^8B0000關閉^000000";
+	switch(select("^4B0082◆^000000 角色服務【" + .@status$ + "】:^8B0000◆^000000 素質重置【" + $PMStatResetFee + "】:^4B0082◆^000000 技能重置【" + $PMSkillResetFee + "】:^8B4513◆^000000 髮型變更【" + $PMHairFee + "】:^006400◆^000000 髮色變更【" + $PMHairColorFee + "】:^000080◆^000000 服裝染色【" + $PMClothFee + "】:^555555◇ 返回服務管理^000000")) {
+	case 1: $PMRoleActive = !$PMRoleActive; goto OnGMRoleManage;
+	case 2: input .@fee,1,100000000; $PMStatResetFee = .@fee; goto OnGMRoleManage;
+	case 3: input .@fee,1,100000000; $PMSkillResetFee = .@fee; goto OnGMRoleManage;
+	case 4: input .@fee,1,100000000; $PMHairFee = .@fee; goto OnGMRoleManage;
+	case 5: input .@fee,1,100000000; $PMHairColorFee = .@fee; goto OnGMRoleManage;
+	case 6: input .@fee,1,100000000; $PMClothFee = .@fee; goto OnGMRoleManage;
+	default: goto OnGMAdminServices;
+	}
+// ============================================================
+// Persistent server rate management
+// ============================================================
+OnGMRateManage:
+	if (getgmlevel() < 99)
+		close;
+	switch(select("^8B0000★^000000 經驗倍率【" + $PMRateExp + " 倍】:^006400◆^000000 一般掉寶【" + $PMRateDrop + " 倍】:^4B0082◆^000000 裝備掉寶【" + $PMRateEquip + " 倍】:^8B4513◆^000000 卡片掉寶【" + $PMRateCard + " 倍】:^000080◆^000000 首領掉寶【" + $PMRateMvp + " 倍】:^555555◇ 返回伺服器管理^000000")) {
+	case 1:
+		dispbottom "請輸入經驗倍率，1 代表一倍，最高 10000 倍。";
+		input .@rate,1,10000;
+		if (select("^8B0000◆^000000 套用經驗倍率【" + .@rate + " 倍】:^555555◇ 取消^000000") != 1) goto OnGMRateManage;
+		$PMRateExp = .@rate;
+		break;
+	case 2:
+		dispbottom "請輸入一般掉寶倍率，1 代表一倍，最高 10000 倍。";
+		input .@rate,1,10000;
+		if (select("^006400◆^000000 套用一般掉寶【" + .@rate + " 倍】:^555555◇ 取消^000000") != 1) goto OnGMRateManage;
+		$PMRateDrop = .@rate;
+		break;
+	case 3:
+		dispbottom "請輸入裝備掉寶倍率，1 代表一倍，最高 10000 倍。";
+		input .@rate,1,10000;
+		if (select("^4B0082◆^000000 套用裝備掉寶【" + .@rate + " 倍】:^555555◇ 取消^000000") != 1) goto OnGMRateManage;
+		$PMRateEquip = .@rate;
+		break;
+	case 4:
+		dispbottom "請輸入卡片掉寶倍率，1 代表一倍，最高 10000 倍。";
+		input .@rate,1,10000;
+		if (select("^8B4513◆^000000 套用卡片掉寶【" + .@rate + " 倍】:^555555◇ 取消^000000") != 1) goto OnGMRateManage;
+		$PMRateCard = .@rate;
+		break;
+	case 5:
+		dispbottom "請輸入首領掉寶倍率，1 代表一倍，最高 10000 倍。";
+		input .@rate,1,10000;
+		if (select("^000080◆^000000 套用首領掉寶【" + .@rate + " 倍】:^555555◇ 取消^000000") != 1) goto OnGMRateManage;
+		$PMRateMvp = .@rate;
+		break;
+	default:
+		goto OnGMAdminDatabase;
+	}
+	callsub S_ApplyServerRates;
+	dispbottom "伺服器倍率已立即套用並永久保存。";
+	goto OnGMRateManage;
+
+S_ApplyServerRates:
+	setbattleflag "base_exp_rate",$PMRateExp * 100;
+	setbattleflag "job_exp_rate",$PMRateExp * 100;
+	setbattleflag "mvp_exp_rate",$PMRateExp * 100;
+	setbattleflag "quest_exp_rate",$PMRateExp * 100;
+	setbattleflag "item_rate_common",$PMRateDrop * 100;
+	setbattleflag "item_rate_common_boss",$PMRateDrop * 100;
+	setbattleflag "item_rate_common_mvp",$PMRateDrop * 100;
+	setbattleflag "item_rate_heal",$PMRateDrop * 100;
+	setbattleflag "item_rate_heal_boss",$PMRateDrop * 100;
+	setbattleflag "item_rate_heal_mvp",$PMRateDrop * 100;
+	setbattleflag "item_rate_use",$PMRateDrop * 100;
+	setbattleflag "item_rate_use_boss",$PMRateDrop * 100;
+	setbattleflag "item_rate_use_mvp",$PMRateDrop * 100;
+	setbattleflag "item_rate_treasure",$PMRateDrop * 100;
+	setbattleflag "item_rate_equip",$PMRateEquip * 100;
+	setbattleflag "item_rate_equip_boss",$PMRateEquip * 100;
+	setbattleflag "item_rate_equip_mvp",$PMRateEquip * 100;
+	setbattleflag "item_rate_card",$PMRateCard * 100;
+	setbattleflag "item_rate_card_boss",$PMRateCard * 100;
+	setbattleflag "item_rate_card_mvp",$PMRateCard * 100;
+	setbattleflag "item_rate_mvp",$PMRateMvp * 100,true;
+	return;
+
+S_ServerStatus:
+	dispbottom "【伺服器狀況】線上 " + getusers(1) + " 人｜經驗 " + $PMRateExp + " 倍｜一般掉寶 " + $PMRateDrop + " 倍",0xFF8C00;
+	dispbottom "【倍率明細】裝備 " + $PMRateEquip + " 倍｜卡片 " + $PMRateCard + " 倍｜首領 " + $PMRateMvp + " 倍",0xFF8C00;
+	return;
+OnGMPotionManage:
+	if (getgmlevel() < 99)
+		close;
+
+	switch(select("^006400◆^000000 新增或修改商品:^8B0000◆^000000 刪除商品:^8B4513※^000000 重設基本藥水【價格加成 50%】:^555555◇ 返回管理員工具^000000")) {
+	case 1:
+		input .@item_id, 1, 1000000;
+		input .@price, 1, 2147483647;
+		.@found = -1;
+		for (.@i = 0; .@i < $PMShopCount; .@i++) {
+			if ($PMShopItem[.@i] == .@item_id) {
+				.@found = .@i;
+				break;
+			}
+		}
+		if (.@found >= 0) {
+			npcshopdelitem "PortablePotionShop", .@item_id;
+			$PMShopPrice[.@found] = .@price;
+		}
+		else {
+			$PMShopItem[$PMShopCount] = .@item_id;
+			$PMShopPrice[$PMShopCount] = .@price;
+			$PMShopCount++;
+		}
+		npcshopadditem "PortablePotionShop", .@item_id, .@price;
+		goto OnGMPotionManage;
+
+	case 2:
+		goto OnGMPotionDelete;
+
+	case 3:
+		callsub S_ResetPotionShop;
+		goto OnGMPotionManage;
+
+	default:
+		goto OnGMAdminTools;
+	}
+
+OnGMPotionDelete:
+	if ($PMShopCount <= 0)
+		goto OnGMPotionManage;
+
+	.@menu$ = "";
+	for (.@i = 0; .@i < $PMShopCount; .@i++)
+		.@menu$ += getitemname($PMShopItem[.@i]) + "【" + $PMShopPrice[.@i] + " Zeny】:";
+	.@menu$ += "返回商品管理";
+	.@choice = select(.@menu$) - 1;
+	if (.@choice >= $PMShopCount)
+		goto OnGMPotionManage;
+
+	npcshopdelitem "PortablePotionShop", $PMShopItem[.@choice];
+	for (.@i = .@choice; .@i < $PMShopCount - 1; .@i++) {
+		$PMShopItem[.@i] = $PMShopItem[.@i + 1];
+		$PMShopPrice[.@i] = $PMShopPrice[.@i + 1];
+	}
+	$PMShopCount--;
+	deletearray $PMShopItem[$PMShopCount], 1;
+	deletearray $PMShopPrice[$PMShopCount], 1;
+	goto OnGMPotionDelete;
+
+S_ResetPotionShop:
+	callsub S_ClearPotionShop;
+	setarray $PMShopItem[0], 501, 502, 503, 504, 505, 506;
+	setarray $PMShopPrice[0], 75, 300, 825, 1800, 7500, 60;
+	$PMShopCount = 6;
+	$PMShopInitialized = 1;
+	callsub S_LoadPotionShop;
+	return;
+
+S_ClearPotionShop:
+	for (.@i = 0; .@i < $PMShopCount; .@i++)
+		npcshopdelitem "PortablePotionShop", $PMShopItem[.@i];
+	npcshopdelitem "PortablePotionShop", 501;
+	return;
+
+S_LoadPotionShop:
+	for (.@i = 0; .@i < $PMShopCount; .@i++)
+		npcshopadditem "PortablePotionShop", $PMShopItem[.@i], $PMShopPrice[.@i];
+	return;
+
+OnInit:
+	if (!$PMRatesInitialized) {
+		$PMRateExp = 1;
+		$PMRateDrop = 1;
+		$PMRateEquip = 1;
+		$PMRateCard = 1;
+		$PMRateMvp = 1;
+		$PMRatesInitialized = 1;
+	}
+	// Apply persisted rates at startup.
+	callsub S_ApplyServerRates;
+	if (!$PMExpandedInitialized) {
+		$PMHealFee = 3000;
+		$PMReturnFee = 2000;
+		$PMStorageFee = 1000;
+		$PMSaveFee = 10000;
+		$PMGuildStorageFee = 2000;
+		$PMRoleActive = 1;
+		$PMStatResetFee = 1000000;
+		$PMSkillResetFee = 1000000;
+		$PMHairFee = 100000;
+		$PMHairColorFee = 50000;
+		$PMClothFee = 100000;
+		$PMExpandedInitialized = 1;
+	}
+	if (!$PMServiceInitialized) {
+		$PMServiceActive = 1;
+		$PMIdentifyFee = 1000;
+		$PMPurifyFee = 10000;
+		$PMServiceInitialized = 1;
+	}
+	if (!$PMTravelInitialized) {
+		$PMTravelActive = 1;
+		$PMTravelTownFee = 5000;
+		$PMTravelFieldFee = 15000;
+		$PMTravelDungeonFee = 25000;
+		$PMTravelInitialized = 1;
+	}
+	if (!$PMSupplyInitialized) {
+		$PMSupplyName$ = "特別活動補給";
+		$PMSupplyFee = 10000;
+		$PMSupplyRound = 0;
+		$PMSupplyActive = 0;
+		$PMSupplyCount = 0;
+		$PMSupplyInitialized = 1;
+	}
+	if (!$PWEnchantInitialized) {
+		$PWEnchant = 1;
+		$PWEnchantInitialized = 1;
+	}
+	if (!$PWInitialized) {
+		$PWRefine = 1;
+		$PWGrade = 1;
+		$PWMerge = 1;
+		$PWEnchant = 1;
+		$PWSocket = 1;
+		$PWCardRemove = 1;
+		$PWCardMove = 1;
+		$PWGradeExchange = 1;
+		$PWRepair = 1;
+		$PWInitialized = 1;
+	}
+	if (!$PMShopInitialized)
+		callsub S_ResetPotionShop;
+	else {
+		npcshopdelitem "PortablePotionShop", 501;
+		callsub S_LoadPotionShop;
+	}
+	end;
+}
+
+-	shop	PortablePotionShop	-1,501:75
